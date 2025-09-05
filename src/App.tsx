@@ -2,8 +2,8 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, Loader, Preload } from "@react-three/drei";
 import { Suspense } from "react";
 import * as THREE from "three";
-import Ring from "./components/Ring";
-import Postprocessing from "./components/Postprocessing";
+import Ring from "@/components/three/Ring";
+import Postprocessing from "@/components/three/Postprocessing";
 
 export default function App() {
   return (
