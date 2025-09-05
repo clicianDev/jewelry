@@ -65,6 +65,7 @@ export default function HandTracker() {
                     canvasRef.current.width = vw;
                     canvasRef.current.height = vh;
                 }
+                // Store video element for reuse (env background, etc.)
                 setVideoEl(videoRef.current);
 
                 setReady(true);
