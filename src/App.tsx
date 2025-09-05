@@ -4,10 +4,12 @@ import { Suspense } from "react";
 import * as THREE from "three";
 import Ring from "@/components/three/Ring";
 import Postprocessing from "@/components/three/Postprocessing";
+import HandTracker from "@/components/mediapipe/HandTracker";
 
 export default function App() {
   return (
-    <div style={{ height: "100vh", background: "#0c0c0c" }}>
+    <div style={{ position: "fixed", inset: 0 }}>
+      <HandTracker/>
       <Canvas
         dpr={[1, 2]}
         shadows={{ type: THREE.PCFSoftShadowMap }}
