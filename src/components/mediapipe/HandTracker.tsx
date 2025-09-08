@@ -182,7 +182,6 @@ export default function HandTracker() {
                         animation: "fadeIn 0.4s ease"
                     }}
                 >
-                    {/* Hand icon from public assets */}
                     <img
                         src="/hand.svg"
                         alt="Hand"
@@ -194,7 +193,7 @@ export default function HandTracker() {
                         }}
                     />
                     <div style={{ maxWidth: 320, lineHeight: 1.3 }}>
-                        <strong>Show your hand</strong><br />Hold your hand up to the camera so we can detect landmarks.
+                        <strong>Show your hand</strong><br />Position your hand to try the ring on.
                     </div>
                 </div>
             )}
