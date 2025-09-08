@@ -5,8 +5,12 @@ import * as THREE from "three";
 import Ring from "@/components/three/Ring";
 import Postprocessing from "@/components/three/Postprocessing";
 import HandTracker from "@/components/mediapipe/HandTracker";
+import { useHandStore } from "@/store/hands";
 
 export default function App() {
+  const landmarks = useHandStore((state) => state.landmarks);
+  const videoEl = useHandStore((state) => state.videoEl);
+
   return (
     <div style={{ position: "fixed", inset: 0 }}>
       <HandTracker/>
@@ -14,13 +18,13 @@ export default function App() {
         dpr={[1, 2]}
         shadows={{ type: THREE.PCFSoftShadowMap }}
         gl={{ antialias: true, preserveDrawingBuffer: true }}
-        camera={{ position: [2.2, 1.4, 2.2], fov: 45}}
+        camera={{ position: [129, 82.1, 129], fov: 45}}
       >
         <Suspense fallback={null}>
           {/* Environment for realistic reflections */}
           <Environment preset="city" resolution={1080} />
           <Postprocessing />
-          <Ring />
+          {landmarks?.length && videoEl && <Ring />}
           {/* Preload all assets referenced in the scene */}
           <Preload all />
         </Suspense>
