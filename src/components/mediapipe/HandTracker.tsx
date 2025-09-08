@@ -12,6 +12,8 @@ export default function HandTracker() {
     const setVideoEl = useHandStore((state) => state.setVideoEl);
     const landmarkerRef = useRef<HandLandmarker | null>(null);
     const animationRef = useRef<number | null>(null);
+    // const fpsTimes = useRef<number[]>([]); // For FPS calculation
+    // const lastLogRef = useRef<number>(0);
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -107,6 +109,13 @@ export default function HandTracker() {
                                     });
                                 });
                             }
+
+                            //Custom FPS calculation and logging for accuracy
+
+                            // const fps = computeAndLogFps(nowMs, fpsTimes.current, lastLogRef);
+                            // ctx.fillStyle = "white";
+                            // ctx.font = "20px Arial";
+                            // ctx.fillText(`FPS: ${fps.toFixed(1)}`, 10, 30);
                         }
                     }
 
@@ -153,3 +162,23 @@ export default function HandTracker() {
         </div>
     )
 }
+
+// Custom FPS calculation and logging
+
+// function computeAndLogFps(nowMs: number, buffer: number[], lastLog: { current: number }) {
+//     buffer.push(nowMs);
+//     const windowMs = 2000;
+//     const cutoff = nowMs - windowMs;
+//     while (buffer.length && buffer[0] < cutoff) buffer.shift();
+//     let fps = 0;
+//     if (buffer.length > 1) {
+//         const duration = buffer[buffer.length - 1] - buffer[0];
+//         fps = (buffer.length - 1) / (duration / 1000);
+//     }
+//     if (!lastLog.current || nowMs - lastLog.current > 2000) {
+//         lastLog.current = nowMs;
+//         // Average FPS over this window
+//         console.log(`[HandTracker] avg FPS: ${fps.toFixed(1)}`);
+//     }
+//     return fps;
+// }
