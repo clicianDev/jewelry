@@ -8,6 +8,7 @@ export default function HandTracker() {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [ready, setReady] = useState(false);
+    const landmarks = useHandStore((state) => state.landmarks);
     const setLandmarks = useHandStore((state) => state.setLandmarks);
     const setVideoEl = useHandStore((state) => state.setVideoEl);
     const landmarkerRef = useRef<HandLandmarker | null>(null);
@@ -159,6 +160,44 @@ export default function HandTracker() {
             <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: ready ? "block" : "none" }}/>
             {/* Keep video mounted for Safari autoplay policy */}
             <video ref={videoRef} playsInline muted style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
+            {/* Display guidance overlay if no hand detected (after camera ready) */}
+            {ready && !landmarks && (
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 12,
+                        background: "rgba(0,0,0,0.35)",
+                        color: "white",
+                        fontFamily: "system-ui, sans-serif",
+                        fontSize: 18,
+                        letterSpacing: 0.5,
+                        textAlign: "center",
+                        backdropFilter: "blur(2px)",
+                        pointerEvents: "none",
+                        animation: "fadeIn 0.4s ease"
+                    }}
+                >
+                    {/* Hand icon from public assets */}
+                    <img
+                        src="/hand.svg"
+                        alt="Hand"
+                        width={140}
+                        height={140}
+                        style={{
+                            filter: "brightness(0) invert(1) drop-shadow(0 2px 4px rgba(0,0,0,0.4))",
+                            opacity: 0.9
+                        }}
+                    />
+                    <div style={{ maxWidth: 320, lineHeight: 1.3 }}>
+                        <strong>Show your hand</strong><br />Hold your hand up to the camera so we can detect landmarks.
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
