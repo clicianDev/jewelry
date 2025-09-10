@@ -12,7 +12,7 @@ export default function App() {
   const videoEl = useHandStore((state) => state.videoEl);
 
   return (
-    <div style={{ position: "fixed", inset: 0 }}>
+    <div style={{ position: "fixed", inset: 0, background: "linear-gradient(135deg, #111214 0%, #080809 55%, #050506 100%)" }}>
       <HandTracker/>
       <Canvas
         dpr={[1, 2]}
