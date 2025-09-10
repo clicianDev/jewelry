@@ -104,7 +104,7 @@ export default function HandTracker() {
                             if(res?.landmarks?.length){
                                 res.landmarks.forEach((hand, i) => {
                                     const handed = res.handedness?.[i]?.[0]?.categoryName || "unknown";
-                                    const color = handed === "Left" ? "red" : handed === "Right" ? "blue" : "white";
+                                    const color = handed === "Left" ? "green" : handed === "Right" ? "purple" : "white";
                                     ctx.fillStyle = color;
                                     hand.forEach((p) => {
                                         const x = (1 - p.x) * w; // flip x because of mirrored
