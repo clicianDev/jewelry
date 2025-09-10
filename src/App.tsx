@@ -2,14 +2,16 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, Loader, Preload, Stats } from "@react-three/drei";
 import { Suspense } from "react";
 import * as THREE from "three";
-import Ring from "@/components/three/Ring";
 import Postprocessing from "@/components/three/Postprocessing";
 import HandTracker from "@/components/mediapipe/HandTracker";
 import { useHandStore } from "@/store/hands";
+import RingPresence from "@/components/three/RingPresense";
+
 
 export default function App() {
   const landmarks = useHandStore((state) => state.landmarks);
   const videoEl = useHandStore((state) => state.videoEl);
+  const showRing = !!(landmarks?.length && videoEl);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "linear-gradient(135deg, #111214 0%, #080809 55%, #050506 100%)" }}>
@@ -24,7 +26,8 @@ export default function App() {
           {/* Environment for realistic reflections */}
           <Environment preset="city" resolution={1080} />
           <Postprocessing />
-          {landmarks?.length && videoEl && <Ring />}
+          {/* Wrap ring for smooth transitions */}
+          <RingPresence show={showRing} />
           {/* Preload all assets referenced in the scene */}
           <Preload all />
         </Suspense>
