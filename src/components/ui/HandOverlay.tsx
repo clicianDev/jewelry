@@ -11,7 +11,6 @@ export default function HandOverlay() {
         gap: 12,
         background: "rgba(0,0,0,0.35)",
         color: "white",
-        fontFamily: "system-ui, sans-serif",
         fontSize: 18,
         letterSpacing: 0.5,
         textAlign: "center",
@@ -31,7 +30,7 @@ export default function HandOverlay() {
           opacity: 0.9,
         }}
       />
-      <div style={{ maxWidth: 320, lineHeight: 1.3 }}>
+      <div style={{ maxWidth: 325, lineHeight: 1.3 }}>
         <strong>Show your hand</strong>
         <br />
         Position your hand to try the ring on.
