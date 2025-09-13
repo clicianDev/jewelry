@@ -18,9 +18,10 @@ export default function Ring() {
   const pos = useRef(new THREE.Vector3());
   const baseDiameter = useRef<number | null>(null);
   const targetScale = useRef(1);
+  const viewAxisAngle = useRef(0); // smoothed rotation around camera view axis
 
   // Tuning
-  const BASE_DISTANCE = 50; // Meters in front of the camera
+  const BASE_DISTANCE = 30; // Meters in front of the camera
   const POS_DAMP = 12;
   const SCALE_DAMP = 12;
   const SCALE_MIN = 0.1;
@@ -100,11 +101,13 @@ export default function Ring() {
   useFrame((_, delta) => {
     const lms = landmarks;
     if (lms && lms.length >= 21 && group.current) {
-      // Use ring finger pip (index 14). MediaPipe normalized coords: x in [0,1] left->right, y in [0,1] top->bottom
-      const tip = lms[14];
-      // Convert to NDC (-1..1). Our video is mirrored, so flip X.
-      const mirroredX = 1 - tip.x;
-      ndc.current.set(mirroredX * 2 - 1, -(tip.y * 2 - 1), 0.5);
+      // Midpoint between ring finger MCP (13) and PIP (14)
+      const p13 = lms[13];
+      const p14 = lms[14];
+      const midX = (p13.x + p14.x) / 2;
+      const midY = (p13.y + p14.y) / 2;
+      const mirroredX = 1 - midX; // account for mirrored video
+      ndc.current.set(mirroredX * 2 - 1, -(midY * 2 - 1), 0.5);
       // Unproject from NDC to world: create a ray from camera through ndc
       ndc.current.unproject(camera);
       dir.current.copy(ndc.current).sub(camera.position).normalize();
@@ -117,11 +120,9 @@ export default function Ring() {
       const posAlpha = 1 - Math.exp(-POS_DAMP * delta);
       group.current.position.lerp(pos.current, posAlpha);
 
-      // Estimate finger width on screen (normalized units) using landmarks 13 and 15 around PIP
-      const a = lms[13];
-      const b = lms[15];
-      const dx = a.x - b.x;
-      const dy = a.y - b.y;
+      // Estimate finger width using distance between 13 and 14 (local segment thickness proxy)
+      const dx = p13.x - p14.x;
+      const dy = p13.y - p14.y;
       const widthNorm = Math.sqrt(dx * dx + dy * dy); // ~finger diameter in normalized image space
 
       // Convert normalized width on screen to desired world diameter at this depth
@@ -150,10 +151,19 @@ export default function Ring() {
         );
         group.current.scale.setScalar(targetScale.current);
       }
-      // Face camera a bit and add subtle rotation
+      // Face camera and orient perpendicular to 13->14 segment in screen space
       group.current.lookAt(camera.position);
-      group.current.rotateX(delta * 0.5);
-      group.current.rotateY(delta * 0.3);
+      const x13s = 1 - p13.x; // mirrored
+      const y13s = p13.y;
+      const x14s = 1 - p14.x;
+      const y14s = p14.y;
+      const segAngle = Math.atan2(y14s - y13s, x14s - x13s);
+      const targetAngle = segAngle + Math.PI / 2;
+      const curr = viewAxisAngle.current;
+      const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI; // shortest path
+      const angleAlpha = Math.min(1, delta * 10);
+      viewAxisAngle.current = curr + diff * angleAlpha;
+      group.current.rotation.z = viewAxisAngle.current;
     } else if (group.current) {
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
