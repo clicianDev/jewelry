@@ -38,7 +38,7 @@ export default function Ring() {
   const FINGER_DIAMETER_TO_SEGMENT_RATIO = 0.37; // mid value; user variation expected
 
   // Fit factor > 1 means leave some slack so ring doesn't intersect finger mesh visually.
-  const SNUG_FIT = 1.08;
+  const SNUG_FIT = 0.65;
 
   // Enable shadows and gently tune PBR materials for better metal reflections
   useEffect(() => {
