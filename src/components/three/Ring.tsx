@@ -19,15 +19,26 @@ export default function Ring() {
   const baseDiameter = useRef<number | null>(null);
   const targetScale = useRef(1);
   const viewAxisAngle = useRef(0); // smoothed rotation around camera view axis
+  const smoothedFingerDiameterNorm = useRef<number | null>(null); // smoothed normalized (0..1) finger diameter on screen
 
   // Tuning
-  const BASE_DISTANCE = 30; // Meters in front of the camera
-  const POS_DAMP = 12;
-  const SCALE_DAMP = 12;
-  const SCALE_MIN = 0.1;
-  const SCALE_MAX = 3.0;
+  // ---------------- Scaling Tuning ----------------
+  const BASE_DISTANCE = 30; // baseline world depth to place the ring (arbitrary scene units)
+  const POS_DAMP = 12; // positional damping (higher = snappier)
+  const SCALE_DAMP = 14; // scale damping
+  const WIDTH_DAMP = 22; // damping for raw finger diameter measurement
+  const SCALE_MIN = 0.05; // allow a little smaller now
+  const SCALE_MAX = 3.5;
 
-  const SNUG = 0.2; // How tightly the ring fits around the finger (in meters)
+  // Model calibration: estimate ratio (inner_diameter / measured_box_diameter)
+  // If your model's bounding box covers outer metal thickness, inner hole is smaller.
+  const MODEL_INNER_DIAMETER_RATIO = 0.78; // tweak if ring looks too big/small
+
+  // Anatomical heuristic: proximal phalanx width ≈ 0.34–0.40 of proximal segment length (13->14)
+  const FINGER_DIAMETER_TO_SEGMENT_RATIO = 0.37; // mid value; user variation expected
+
+  // Fit factor > 1 means leave some slack so ring doesn't intersect finger mesh visually.
+  const SNUG_FIT = 1.08;
 
   // Enable shadows and gently tune PBR materials for better metal reflections
   useEffect(() => {
@@ -120,23 +131,41 @@ export default function Ring() {
       const posAlpha = 1 - Math.exp(-POS_DAMP * delta);
       group.current.position.lerp(pos.current, posAlpha);
 
-      // Estimate finger width using distance between 13 and 14 (local segment thickness proxy)
-      const dx = p13.x - p14.x;
-      const dy = p13.y - p14.y;
-      const widthNorm = Math.sqrt(dx * dx + dy * dy); // ~finger diameter in normalized image space
+      // --- Finger Diameter Estimation (Normalized Screen Space) ---
+      // Use length of proximal segment (13 -> 14) as a stable axis-aligned measure; multiply by anatomical ratio
+      const dxSeg = p13.x - p14.x;
+      const dySeg = p13.y - p14.y;
+      const segmentLenNorm = Math.sqrt(dxSeg * dxSeg + dySeg * dySeg); // proximal phalanx length (normalized)
+      const rawDiameterNorm = segmentLenNorm * FINGER_DIAMETER_TO_SEGMENT_RATIO;
+      // Smooth the (often noisy) per-frame diameter estimate
+      const widthAlpha = 1 - Math.exp(-WIDTH_DAMP * delta);
+      smoothedFingerDiameterNorm.current =
+        smoothedFingerDiameterNorm.current == null
+          ? rawDiameterNorm
+          : THREE.MathUtils.lerp(
+              smoothedFingerDiameterNorm.current,
+              rawDiameterNorm,
+              widthAlpha
+            );
 
-      // Convert normalized width on screen to desired world diameter at this depth
+      const diameterNorm = smoothedFingerDiameterNorm.current;
+
+      // Convert normalized diameter on screen to desired world diameter at this depth
       const aspect = size.width / size.height;
       const fovRad = THREE.MathUtils.degToRad(
         (camera as THREE.PerspectiveCamera).fov
       );
       const viewWidthAtZ = 2 * distance * Math.tan(fovRad / 2) * aspect; // world units across NDC -1..1
-      const desiredWorldDiameter = widthNorm * viewWidthAtZ; // widthNorm fraction of the view width
+      const desiredWorldDiameter = diameterNorm * viewWidthAtZ; // diameter fraction of full width
 
       if (baseDiameter.current) {
-        // Compute target uniform scale so model outer diameter matches desired diameter
+        // Calibrate to inner diameter of the ring (not bounding box outer diameter)
+        const modelInnerDiameter =
+          baseDiameter.current * MODEL_INNER_DIAMETER_RATIO;
+        // We want: scaled_model_inner_diameter ≈ desiredWorldDiameter * SNUG_FIT
+        // => scale = (desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter
         const fitScaleRaw =
-          (desiredWorldDiameter / baseDiameter.current) * SNUG;
+          (desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter;
         const fitScale = THREE.MathUtils.clamp(
           fitScaleRaw,
           SCALE_MIN,
