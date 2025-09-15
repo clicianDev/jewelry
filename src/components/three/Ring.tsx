@@ -187,7 +187,7 @@ export default function Ring() {
       const x14s = 1 - p14.x;
       const y14s = p14.y;
       const segAngle = Math.atan2(y14s - y13s, x14s - x13s);
-      const targetAngle = segAngle + Math.PI / 2;
+      const targetAngle = -segAngle + 0.5;
       const curr = viewAxisAngle.current;
       const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI; // shortest path
       const angleAlpha = Math.min(1, delta * 10);
