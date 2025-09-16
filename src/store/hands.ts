@@ -11,16 +11,21 @@ type HandState = {
     landmarks: Landmark[] | null;
     // -1..1 handedness score and label if needed later
     handedness: string | null;
+    // Orientation of the detected hand relative to camera: 'palm' | 'back'
+    orientation: 'palm' | 'back' | null;
     // The live webcam video element for reuse (env background, etc.)
     videoEl: HTMLVideoElement | null;
     setLandmarks: (landmarks: Landmark[] | null, handedness?: string | null) => void;
     setVideoEl: (el: HTMLVideoElement | null) => void;
+    setOrientation: (orientation: 'palm' | 'back' | null) => void;
 }
 
 export const useHandStore = create<HandState>((set) => ({
     landmarks: null,
     handedness: null,
+    orientation: null,
     videoEl: null,
     setLandmarks: (landmarks, handedness = null) => set(() => ({ landmarks, handedness })),
     setVideoEl: (videoEl) => set({ videoEl }),
+    setOrientation: (orientation) => set({ orientation }),
 }));

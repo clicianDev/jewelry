@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useHandStore } from "@/store/hands";
 import { FilesetResolver, HandLandmarker, type HandLandmarkerResult } from "@mediapipe/tasks-vision";
+import type { Landmark } from "@/store/hands";
 import HandOverlay from "@/components/ui/HandOverlay";
 
 
@@ -12,11 +13,14 @@ export default function HandTracker() {
     const [camError, setCamError] = useState<string | null>(null);
     const landmarks = useHandStore((state) => state.landmarks);
     const setLandmarks = useHandStore((state) => state.setLandmarks);
+    const setOrientation = useHandStore((state) => state.setOrientation);
     const setVideoEl = useHandStore((state) => state.setVideoEl);
     const landmarkerRef = useRef<HandLandmarker | null>(null);
     const animationRef = useRef<number | null>(null);
     const fpsTimes = useRef<number[]>([]); // For FPS calculation
     const lastLogRef = useRef<number>(0);
+    const lastOrientationRef = useRef<string | null>(null);
+    const lastOrientationLogTs = useRef<number>(0);
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -130,8 +134,24 @@ export default function HandTracker() {
                         const first = res.landmarks[0];
                         const handed = res.handedness?.[0]?.[0]?.categoryName ?? null;
                         setLandmarks(first.map((p) => ({ x: p.x, y: p.y, z: p.z })), handed);
+
+                        // Orientation detection (palm vs back) & log when it changes (rate-limited)
+                        const orientation = detectHandOrientation(first as unknown as Landmark[], lastOrientationRef.current, handed);
+                        if (orientation && orientation !== lastOrientationRef.current) {
+                            const now = performance.now();
+                            if (now - lastOrientationLogTs.current > 250) { // debounce window
+                                lastOrientationRef.current = orientation;
+                                lastOrientationLogTs.current = now;
+                                console.log(`[HandTracker] Hand showing: ${orientation}`);
+                                setOrientation(orientation as 'palm' | 'back');
+                            }
+                        }
                     } else {
                         setLandmarks(null, null);
+                        if (lastOrientationRef.current !== null) {
+                            lastOrientationRef.current = null;
+                            setOrientation(null);
+                        }
                     }
 
                     animationRef.current = requestAnimationFrame(loop);
@@ -159,7 +179,7 @@ export default function HandTracker() {
                 stream.getTracks().forEach((t) => t.stop());
             }
         }
-    }, [setLandmarks, setVideoEl]);
+    }, [setLandmarks, setVideoEl, setOrientation]);
 
     // Fallback UI if camera not accessible
     if (camError) {
@@ -210,4 +230,88 @@ function computeAndLogFps(nowMs: number, buffer: number[], lastLog: { current: n
         console.log(`[HandTracker] avg FPS: ${fps.toFixed(1)}`);
     }
     return fps;
+}
+
+// Heuristic orientation detection using a subset of landmarks.
+// Returns 'palm' if palm (camera-facing) or 'back' if back of hand likely showing.
+// Approach: Compute normal from triangle (wrist(0), index MCP(5), pinky MCP(17)).
+// For a Palm facing the camera (and image already mirrored), z of landmarks tends to:
+// - MediaPipe z: more negative values are closer to camera.
+// So if average z of finger MCPs (5,9,13,17) is closer (more negative) than wrist significantly and
+// the normal points toward camera (negative z), we consider palm.
+function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null, handedness?: string | null): string | null {
+    if (!lms || lms.length < 21) return null;
+    // Landmark indices for orientation cues
+    const WRIST = 0;
+    const INDEX_MCP = 5; // base of index
+    const PINKY_MCP = 17; // base of pinky
+
+    const wrist = lms[WRIST];
+    const indexMcp = lms[INDEX_MCP];
+    const pinkyMcp = lms[PINKY_MCP];
+    if (!wrist || !indexMcp || !pinkyMcp) return null;
+
+    // Construct vectors on the palm plane
+    const vIndex = {
+        x: indexMcp.x - wrist.x,
+        y: indexMcp.y - wrist.y,
+        z: indexMcp.z - wrist.z,
+    };
+    const vPinky = {
+        x: pinkyMcp.x - wrist.x,
+        y: pinkyMcp.y - wrist.y,
+        z: pinkyMcp.z - wrist.z,
+    };
+    // Palm normal via cross product (right-hand rule). The sign of z component alone was noisy; use full vector.
+    const nx = vIndex.y * vPinky.z - vIndex.z * vPinky.y;
+    const ny = vIndex.z * vPinky.x - vIndex.x * vPinky.z;
+    const nz = vIndex.x * vPinky.y - vIndex.y * vPinky.x;
+
+    // Normalize normal
+    const nLen = Math.hypot(nx, ny, nz) || 1;
+    const n = { x: nx / nLen, y: ny / nLen, z: nz / nLen };
+
+    // Depth statistics: compare palm center-ish joints vs finger tips to detect facing.
+    const baseZs = [lms[5].z, lms[9].z, lms[13].z, lms[17].z]; // MCP joints
+    const tipZs = [lms[8].z, lms[12].z, lms[16].z, lms[20].z]; // finger tips
+    const avgBaseZ = baseZs.reduce((a, b) => a + b, 0) / baseZs.length;
+    const avgTipZ = tipZs.reduce((a, b) => a + b, 0) / tipZs.length;
+    const wristZ = wrist.z;
+
+    // MediaPipe: more negative z = closer to camera.
+    // Palm facing camera: bases & wrist generally nearer than tips (tips curl away slightly) OR
+    // the palm normal points toward camera (negative z after mirroring) depending on coordinate mirroring.
+    // We'll combine several signals into a score.
+
+    const depthBasesCloser = (avgBaseZ - wristZ); // negative => bases closer
+    const depthTipsRelative = (avgTipZ - avgBaseZ); // positive => tips farther
+
+    // Score components (tunable weights)
+    const normalTowardCamera = -n.z; // if camera forward is -Z in normalized space
+    const baseCloserScore = -depthBasesCloser; // larger if bases closer
+    const tipsFartherScore = depthTipsRelative; // larger if tips farther than bases
+
+    // Weighted sum
+    let palmScore = normalTowardCamera * 0.5 + baseCloserScore * 0.3 + tipsFartherScore * 0.2;
+
+    // If the detected hand is the Left hand, invert score because the mirrored camera view flips facing logic.
+    if (handedness === 'Left') {
+        palmScore = -palmScore;
+    }
+
+    // Hysteresis to avoid flicker: require stronger evidence to switch states
+    const PALM_THRESHOLD = 0.15; // enter palm if score > this
+    const BACK_THRESHOLD = -0.05; // enter back if score < this
+
+    let result: 'palm' | 'back';
+    if (prev === 'palm') {
+        result = palmScore < BACK_THRESHOLD ? 'back' : 'palm';
+    } else if (prev === 'back') {
+        result = palmScore > PALM_THRESHOLD ? 'palm' : 'back';
+    } else {
+        // Initial classification
+        result = palmScore >= 0 ? 'palm' : 'back';
+    }
+
+    return result;
 }
