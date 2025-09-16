@@ -4,7 +4,7 @@ import { useGLTF } from "@react-three/drei";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useHandStore } from "@/store/hands";
 
-import ringUrl from "@/assets/ring.glb";
+import ringUrl from "@/assets/diamond_ring.glb";
 
 export default function Ring() {
   const group = useRef<THREE.Group>(null!);
