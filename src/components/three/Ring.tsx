@@ -9,6 +9,7 @@ import ringUrl from "@/assets/ring.glb";
 export default function Ring() {
   const group = useRef<THREE.Group>(null!);
   const { scene } = useGLTF(ringUrl);
+  const userRotationGroup = useRef<THREE.Group>(null!);
   const landmarks = useHandStore((state) => state.landmarks);
   const { camera, size } = useThree();
 
@@ -24,7 +25,6 @@ export default function Ring() {
   // Tuning
   // ---------------- Scaling Tuning ----------------
   const BASE_DISTANCE = 30; // baseline world depth to place the ring (arbitrary scene units)
-  const POS_DAMP = 12; // positional damping (higher = snappier)
   const SCALE_DAMP = 14; // scale damping
   const WIDTH_DAMP = 22; // damping for raw finger diameter measurement
   const SCALE_MIN = 0.05; // allow a little smaller now
@@ -128,8 +128,8 @@ export default function Ring() {
         .copy(camera.position)
         .add(dir.current.multiplyScalar(distance));
       // Smoothly move to target position to reduce jitter
-      const posAlpha = 1 - Math.exp(-POS_DAMP * delta);
-      group.current.position.lerp(pos.current, posAlpha);
+      // Instant positional update (no noticeable follow delay)
+      group.current.position.copy(pos.current);
 
       // --- Finger Diameter Estimation (Normalized Screen Space) ---
       // Use length of proximal segment (13 -> 14) as a stable axis-aligned measure; multiply by anatomical ratio
@@ -193,6 +193,12 @@ export default function Ring() {
       const angleAlpha = Math.min(1, delta * 10);
       viewAxisAngle.current = curr + diff * angleAlpha;
       group.current.rotation.z = viewAxisAngle.current;
+      // Apply user base rotation offsets to child
+      if (userRotationGroup.current) {
+        // Fixed initial pitch (X) rotation ~1.60 radians, yaw/roll zero
+        userRotationGroup.current.rotation.set(1.6, 0, 0);
+      }
+      
     } else if (group.current) {
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
@@ -201,7 +207,9 @@ export default function Ring() {
   });
   return (
     <group ref={group}>
-      <primitive object={scene} />
+      <group ref={userRotationGroup}>
+        <primitive object={scene} />
+      </group>
     </group>
   );
 }
