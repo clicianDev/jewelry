@@ -6,7 +6,7 @@ import Postprocessing from "@/components/three/Postprocessing";
 import HandTracker from "@/components/mediapipe/HandTracker";
 import { useHandStore } from "@/store/hands";
 import RingPresence from "@/components/three/RingPresense";
-
+// import VideoEnvironment from "@/components/three/VideoEnvironment";
 
 export default function App() {
   const landmarks = useHandStore((state) => state.landmarks);
@@ -23,6 +23,9 @@ export default function App() {
         camera={{ position: [129, 82.1, 129], fov: 45}}
       >
         <Suspense fallback={null}>
+          {/* Use Video as Environment (uncomment to enable) */}
+          {/* <VideoEnvironment /> */}
+          
           {/* Environment for realistic reflections */}
           <Environment preset="city" resolution={1080} />
           <Postprocessing />
