@@ -71,6 +71,12 @@ export default function Ring() {
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
   });
+  // Independent base rotation controller (degrees for UX, converted to radians)
+  const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
+    baseRotX: { value: 1.6 * 57.2958, min: -180, max: 180, step: 0.1 }, // default existing 1.6 rad
+    baseRotY: { value: 0, min: -180, max: 180, step: 0.1 },
+    baseRotZ: { value: 0, min: -180, max: 180, step: 0.1 },
+  });
   const DEFAULT_BIAS_TOWARD_13 = 0.6; // legacy bias baseline
 
   // Enable shadows and gently tune PBR materials for better metal reflections
@@ -263,8 +269,10 @@ export default function Ring() {
       group.current.rotation.z = viewAxisAngle.current;
       // Apply user base rotation offsets to child
       if (userRotationGroup.current) {
-        // Fixed initial pitch (X) rotation ~1.60 radians, yaw/roll zero
-        userRotationGroup.current.rotation.set(1.6, 0, 0);
+        const rx = THREE.MathUtils.degToRad(baseRotX);
+        const ry = THREE.MathUtils.degToRad(baseRotY);
+        const rz = THREE.MathUtils.degToRad(baseRotZ);
+        userRotationGroup.current.rotation.set(rx, ry, rz);
       }
 
       // --- Dynamic half-ring visibility controlled by hand orientation ---
