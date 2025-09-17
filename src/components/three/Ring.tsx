@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { useEffect, useRef } from "react";
 import { useGLTF } from "@react-three/drei";
+import { useControls } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useHandStore } from "@/store/hands";
 
@@ -40,12 +41,15 @@ export default function Ring() {
   const targetScale = useRef(1);
   const viewAxisAngle = useRef(0); // smoothed rotation around camera view axis
   const smoothedFingerDiameterNorm = useRef<number | null>(null); // smoothed normalized (0..1) finger diameter on screen
+  const smoothedPosition = useRef(new THREE.Vector3()); // for subtle smoothing without latency
 
   // Tuning
   // ---------------- Scaling Tuning ----------------
+  // Depth & smoothing tuning (reduced delay):
   const BASE_DISTANCE = 30; // baseline world depth to place the ring (arbitrary scene units)
-  const SCALE_DAMP = 14; // scale damping
-  const WIDTH_DAMP = 22; // damping for raw finger diameter measurement
+  const SCALE_DAMP = 30; // higher => reacts faster (was 14)
+  const WIDTH_DAMP = 45; // higher => reacts faster (was 22)
+  const POSITION_DAMP = 55; // new: smoothing for position (higher = snappy)
   const SCALE_MIN = 0.05; // allow a little smaller now
   const SCALE_MAX = 3.5;
 
@@ -54,10 +58,20 @@ export default function Ring() {
   const MODEL_INNER_DIAMETER_RATIO = 0.78; // tweak if ring looks too big/small
 
   // Anatomical heuristic: proximal phalanx width ≈ 0.34–0.40 of proximal segment length (13->14)
-  const FINGER_DIAMETER_TO_SEGMENT_RATIO = 0.37; // mid value; user variation expected
+  const FINGER_DIAMETER_TO_SEGMENT_RATIO = 0.40; // slightly larger to better approximate real finger thickness
 
   // Fit factor > 1 means leave some slack so ring doesn't intersect finger mesh visually.
-  const SNUG_FIT = 0.65;
+  const SNUG_FIT = 0.72; // slightly looser so model doesn't appear too small
+
+  // Exposed user tuning controls (via Leva) to fine tune size & anchor without code edits.
+  // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
+  // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
+  const { fitAdjust, anchorToward14, alongFinger } = useControls('Ring Fit', {
+    fitAdjust: { value: 1.60, min: 0.5, max: 1.6, step: 0.01 },
+    anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
+    alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
+  });
+  const DEFAULT_BIAS_TOWARD_13 = 0.6; // legacy bias baseline
 
   // Enable shadows and gently tune PBR materials for better metal reflections
   useEffect(() => {
@@ -153,24 +167,36 @@ export default function Ring() {
   useFrame((_, delta) => {
     const lms = landmarks;
     if (lms && lms.length >= 21 && group.current) {
-      // Midpoint between ring finger MCP (13) and PIP (14)
-      const p13 = lms[13];
-      const p14 = lms[14];
-      const midX = (p13.x + p14.x) / 2;
-      const midY = (p13.y + p14.y) / 2;
-      const mirroredX = 1 - midX; // account for mirrored video
-      ndc.current.set(mirroredX * 2 - 1, -(midY * 2 - 1), 0.5);
+  // Weighted midpoint between ring finger MCP (13) and PIP (14) with bias toward 13 (base of finger)
+  const p13 = lms[13]; // ring finger MCP
+  const p14 = lms[14]; // ring finger PIP
+  // Interpolate bias toward joint 14: anchorToward14=0 keeps default, =1 means fully at 14
+  const bias13 = THREE.MathUtils.lerp(DEFAULT_BIAS_TOWARD_13, 0, anchorToward14);
+  const bias14 = 1 - bias13;
+  let midX = p13.x * bias13 + p14.x * bias14;
+  let midY = p13.y * bias13 + p14.y * bias14;
+  if (alongFinger !== 0) {
+    const segX = p14.x - p13.x;
+    const segY = p14.y - p13.y;
+    midX += segX * alongFinger;
+    midY += segY * alongFinger;
+  }
+  const mirroredX = 1 - midX; // account for mirrored video
+  ndc.current.set(mirroredX * 2 - 1, -(midY * 2 - 1), 0.5);
       // Unproject from NDC to world: create a ray from camera through ndc
       ndc.current.unproject(camera);
       dir.current.copy(ndc.current).sub(camera.position).normalize();
       // Place the ring at a fixed distance in front of camera along ray
       const distance = BASE_DISTANCE; // base depth in world units
-      pos.current
-        .copy(camera.position)
-        .add(dir.current.multiplyScalar(distance));
-      // Smoothly move to target position to reduce jitter
-      // Instant positional update (no noticeable follow delay)
-      group.current.position.copy(pos.current);
+      pos.current.copy(camera.position).add(dir.current.multiplyScalar(distance));
+      // Exponential smoothing toward new position (snappy, reduced lag)
+      const posAlpha = 1 - Math.exp(-POSITION_DAMP * delta);
+      if (smoothedPosition.current.lengthSq() === 0) {
+        smoothedPosition.current.copy(pos.current);
+      } else {
+        smoothedPosition.current.lerp(pos.current, posAlpha);
+      }
+      group.current.position.copy(smoothedPosition.current);
 
       // --- Finger Diameter Estimation (Normalized Screen Space) ---
       // Use length of proximal segment (13 -> 14) as a stable axis-aligned measure; multiply by anatomical ratio
@@ -207,8 +233,9 @@ export default function Ring() {
         // => scale = (desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter
         const fitScaleRaw =
           (desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter;
+        // Apply user adjustment multiplier before clamping.
         const fitScale = THREE.MathUtils.clamp(
-          fitScaleRaw,
+          fitScaleRaw * fitAdjust,
           SCALE_MIN,
           SCALE_MAX
         );
@@ -231,7 +258,7 @@ export default function Ring() {
       const targetAngle = -segAngle + 0.5;
       const curr = viewAxisAngle.current;
       const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI; // shortest path
-      const angleAlpha = Math.min(1, delta * 10);
+  const angleAlpha = Math.min(1, delta * 22); // faster orientation catch-up
       viewAxisAngle.current = curr + diff * angleAlpha;
       group.current.rotation.z = viewAxisAngle.current;
       // Apply user base rotation offsets to child
