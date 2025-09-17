@@ -11,7 +11,26 @@ export default function Ring() {
   const { scene } = useGLTF(ringUrl);
   const userRotationGroup = useRef<THREE.Group>(null!);
   const landmarks = useHandStore((state) => state.landmarks);
-  const { camera, size } = useThree();
+  const orientation = useHandStore((state) => state.orientation);
+  // orientation mapping:
+  //  orientation === 'back' : back of hand faces camera -> user sees ring head (stone). We keep head, hide shank.
+  //  orientation === 'palm' : palm faces camera -> user would see underside; show shank instead (hide head) for clarity.
+  //  null/unknown          : default previous behavior (currently behaves like 'back').
+  const { camera, size, gl } = useThree();
+  // Dynamic clipping plane that hides the half of ring facing away from camera.
+  // Why not just rely on material.side = BackSide / FrontSide? The ring is a closed mesh; we want to
+  // selectively remove the *entire back half* (shank) so the stone setting stays visible and we avoid
+  // visual clutter when finger occludes the far geometry. A single plane acts like a live boolean cut.
+  // Alternatives considered:
+  // 1. Splitting model into 'front' + 'shank' meshes and toggling visibility by comparing normal dot view.
+  //    -> Needs authoring change / naming consistency in GLB.
+  // 2. Custom shader discarding fragments with normal dot view < 0.
+  //    -> Removes pixels but still draws back geometry cost; also removes internal metal that might still be wanted.
+  // 3. Stencil / depth pre-pass.
+  //    -> Overkill for simple half hide.
+  // Clipping plane provides clean geometry cutoff and works with shadows (clipShadows = true).
+  const clipPlane = useRef<THREE.Plane | null>(null);
+  const ringMaterials = useRef<THREE.Material[]>([]);
 
   // Helper vector objects to avoid allocations
   const ndc = useRef(new THREE.Vector3());
@@ -42,6 +61,9 @@ export default function Ring() {
 
   // Enable shadows and gently tune PBR materials for better metal reflections
   useEffect(() => {
+  // Enable local clipping on renderer once
+  gl.localClippingEnabled = true;
+
     scene.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
         const mesh = obj as THREE.Mesh;
@@ -61,7 +83,7 @@ export default function Ring() {
         }
       }
     });
-  }, [scene]);
+  }, [scene, gl]);
 
   // Compute model diameter once to scale accurately
   useEffect(() => {
@@ -107,6 +129,25 @@ export default function Ring() {
     box.getSize(s);
     const diameter = Math.max(s.x, s.y); // ring diameter mostly in X/Y
     baseDiameter.current = diameter || 1; // avoid div-by-zero
+
+    // Collect all materials (avoid duplicates) for clipping modification
+    const mats: THREE.Material[] = [];
+    scene.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) {
+        const m = (o as THREE.Mesh).material;
+        if (Array.isArray(m)) {
+          m.forEach((mm) => mm && mats.push(mm));
+        } else if (m) mats.push(m as THREE.Material);
+      }
+    });
+    // Deduplicate by id
+    const unique = Array.from(new Set(mats));
+    ringMaterials.current = unique;
+
+    // Initialize plane once along camera forward axis; normal will get updated per-frame
+    if (!clipPlane.current) {
+      clipPlane.current = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+    }
   }, [scene]);
 
   useFrame((_, delta) => {
@@ -197,6 +238,32 @@ export default function Ring() {
       if (userRotationGroup.current) {
         // Fixed initial pitch (X) rotation ~1.60 radians, yaw/roll zero
         userRotationGroup.current.rotation.set(1.6, 0, 0);
+      }
+
+      // --- Dynamic half-ring visibility controlled by hand orientation ---
+      // Requirement: when orientation === 'back' (back of hand showing to camera) -> show ring HEAD (stone) hide shank
+      //              when orientation === 'palm' (palm toward camera) -> show SHANK hide head
+      // We approximate by flipping clipping plane normal: plane keeps geometry on normal side.
+      if (clipPlane.current) {
+        // Plane normal points toward camera; plane passes through ring center (group position)
+        // Determine view direction from ring center to camera
+        const planeNormal = new THREE.Vector3()
+          .copy(camera.position)
+          .sub(group.current.position)
+          .normalize();
+        // If palm is facing camera we invert to hide head instead (so shank shows)
+        const finalNormal = orientation === 'palm' ? planeNormal.clone().negate() : planeNormal;
+        clipPlane.current.setFromNormalAndCoplanarPoint(
+          finalNormal,
+          group.current.position
+        );  
+        // Apply plane to all materials; side determines which half is kept
+        for (const mat of ringMaterials.current) {
+          // Augment only if material has standard material properties
+            const std = mat as THREE.MeshStandardMaterial;
+            (std as unknown as { clippingPlanes?: THREE.Plane[] }).clippingPlanes = [clipPlane.current];
+            (std as unknown as { clipShadows?: boolean }).clipShadows = true;
+        }
       }
       
     } else if (group.current) {
