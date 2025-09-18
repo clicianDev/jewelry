@@ -13,7 +13,9 @@ export default function Ring() {
   const userRotationGroup = useRef<THREE.Group>(null!);
   const landmarks = useHandStore((state) => state.landmarks);
   const orientation = useHandStore((state) => state.orientation);
-  // orientation mapping:
+  const palmScore = useHandStore((state) => state.palmScore);
+  const handedness = useHandStore((state) => state.handedness);
+
   //  orientation === 'back' : back of hand faces camera -> user sees ring head (stone). We keep head, hide shank.
   //  orientation === 'palm' : palm faces camera -> user would see underside; show shank instead (hide head) for clarity.
   //  null/unknown          : default previous behavior (currently behaves like 'back').
@@ -40,6 +42,7 @@ export default function Ring() {
   const baseDiameter = useRef<number | null>(null);
   const targetScale = useRef(1);
   const viewAxisAngle = useRef(0); // smoothed rotation around camera view axis
+  const tiltX = useRef(0); // smoothed X tilt driven by palmScore
   const smoothedFingerDiameterNorm = useRef<number | null>(null); // smoothed normalized (0..1) finger diameter on screen
   const smoothedPosition = useRef(new THREE.Vector3()); // for subtle smoothing without latency
 
@@ -67,16 +70,16 @@ export default function Ring() {
   // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
   // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
   const { fitAdjust, anchorToward14, alongFinger } = useControls('Ring Fit', {
-    fitAdjust: { value: 1.60, min: 0.5, max: 1.6, step: 0.01 },
+    fitAdjust: { value: 1.10, min: 0.5, max: 1.6, step: 0.01 },
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
-  const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
-    baseRotX: { value: 1.6 * 57.2958, min: -180, max: 180, step: 0.1 }, // default existing 1.6 rad
-    baseRotY: { value: 0, min: -180, max: 180, step: 0.1 },
-    baseRotZ: { value: 0, min: -180, max: 180, step: 0.1 },
-  });
+  // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
+  //   baseRotX: { value: 1.6 * 57.2958, min: -180, max: 180, step: 0.1 }, // default existing 1.6 rad
+  //   baseRotY: { value: 0, min: -180, max: 180, step: 0.1 },
+  //   baseRotZ: { value: 0, min: -180, max: 180, step: 0.1 },
+  // });
   const DEFAULT_BIAS_TOWARD_13 = 0.6; // legacy bias baseline
 
   // Enable shadows and gently tune PBR materials for better metal reflections
@@ -264,15 +267,32 @@ export default function Ring() {
       const targetAngle = -segAngle + 0.5;
       const curr = viewAxisAngle.current;
       const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI; // shortest path
-  const angleAlpha = Math.min(1, delta * 22); // faster orientation catch-up
+      const angleAlpha = Math.min(1, delta * 22); // faster orientation catch-up
       viewAxisAngle.current = curr + diff * angleAlpha;
       group.current.rotation.z = viewAxisAngle.current;
-      // Apply user base rotation offsets to child
+      // Apply user base rotation offsets to child, plus palmScore-driven tilt on X
       if (userRotationGroup.current) {
-        const rx = THREE.MathUtils.degToRad(baseRotX);
-        const ry = THREE.MathUtils.degToRad(baseRotY);
-        const rz = THREE.MathUtils.degToRad(baseRotZ);
+        // Map palmScore [-1..1] to an additive tilt range in radians
+      const TILT_MAX_RAD = THREE.MathUtils.degToRad(35);
+      // Use palmScore when confident; otherwise fallback to orientation so tilt is always visible
+      const EPS = 0.12; // confidence threshold
+      const hasScore = palmScore != null && Math.abs(palmScore) > EPS;
+      const score = hasScore ? (palmScore as number) : (orientation === 'palm' ? 1 : orientation === 'back' ? -1 : 0);
+      const sign = handedness?.toLowerCase() === 'left' ? -1 : 1;
+      const targetTilt = score * TILT_MAX_RAD * sign;
+        // Smoothly approach target tilt
+        const tiltAlpha = 1 - Math.exp(-20 * delta); // damping
+        if(orientation == 'back'){
+        tiltX.current = THREE.MathUtils.lerp(tiltX.current, targetTilt, tiltAlpha);
+        const rx = THREE.MathUtils.degToRad(handedness?.toLowerCase() === 'left' ? -65.0 : -128.0) + (tiltX.current * 10);
+        const ry = THREE.MathUtils.degToRad(0);
+        const rz = THREE.MathUtils.degToRad(0);
         userRotationGroup.current.rotation.set(rx, ry, rz);
+        } else {
+          // Set a default tilt when showing palm (for now, hardcoded)
+        userRotationGroup.current.rotation.set(1, 0, 0);
+        }
+       
       }
 
       // --- Dynamic half-ring visibility controlled by hand orientation ---

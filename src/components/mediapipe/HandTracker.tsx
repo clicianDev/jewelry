@@ -15,6 +15,7 @@ export default function HandTracker() {
     const setLandmarks = useHandStore((state) => state.setLandmarks);
     const setOrientation = useHandStore((state) => state.setOrientation);
     const setVideoEl = useHandStore((state) => state.setVideoEl);
+    const setPalmScore = useHandStore((state) => state.setPalmScore);
     const landmarkerRef = useRef<HandLandmarker | null>(null);
     const animationRef = useRef<number | null>(null);
     const fpsTimes = useRef<number[]>([]); // For FPS calculation
@@ -146,8 +147,13 @@ export default function HandTracker() {
                                 setOrientation(orientation as 'palm' | 'back');
                             }
                         }
+
+                        // Compute a continuous palm score for subtle effects like ring tilt
+                        const score = computePalmScore(first as unknown as Landmark[], handed);
+                        setPalmScore(score);
                     } else {
                         setLandmarks(null, null);
+                        setPalmScore(null);
                         if (lastOrientationRef.current !== null) {
                             lastOrientationRef.current = null;
                             setOrientation(null);
@@ -179,7 +185,7 @@ export default function HandTracker() {
                 stream.getTracks().forEach((t) => t.stop());
             }
         }
-    }, [setLandmarks, setVideoEl, setOrientation]);
+    }, [setLandmarks, setVideoEl, setOrientation, setPalmScore]);
 
     // Fallback UI if camera not accessible
     if (camError) {
@@ -294,15 +300,17 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
     // Weighted sum
     let palmScore = normalTowardCamera * 0.5 + baseCloserScore * 0.3 + tipsFartherScore * 0.2;
 
+    // ring.set.rotation.x.setScore( current rotation + or - palmScore * factor )
+
     // If the detected hand is the Left hand, invert score because the mirrored camera view flips facing logic.
     if (handedness === 'Left') {
         palmScore = -palmScore;
     }
 
     // Hysteresis to avoid flicker: require stronger evidence to switch states
-    const PALM_THRESHOLD = 0.15; // enter palm if score > this
+    const PALM_THRESHOLD = 0.4; // enter palm if score > this
     const BACK_THRESHOLD = -0.05; // enter back if score < this
-
+    
     let result: 'palm' | 'back';
     if (prev === 'palm') {
         result = palmScore < BACK_THRESHOLD ? 'back' : 'palm';
@@ -314,4 +322,55 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
     }
 
     return result;
+}
+
+// Continuous palm score in range roughly [-1, 1]:
+// >0 means palm toward camera; <0 means back of hand toward camera.
+// Uses same underlying cues as detectHandOrientation but returns the weighted sum directly.
+function computePalmScore(lms: Landmark[] | undefined, handedness?: string | null): number {
+    if (!lms || lms.length < 21) return 0;
+
+    const WRIST = 0;
+    const INDEX_MCP = 5;
+    const PINKY_MCP = 17;
+    const wrist = lms[WRIST];
+    const indexMcp = lms[INDEX_MCP];
+    const pinkyMcp = lms[PINKY_MCP];
+    if (!wrist || !indexMcp || !pinkyMcp) return 0;
+
+    const vIndex = {
+        x: indexMcp.x - wrist.x,
+        y: indexMcp.y - wrist.y,
+        z: indexMcp.z - wrist.z,
+    };
+    const vPinky = {
+        x: pinkyMcp.x - wrist.x,
+        y: pinkyMcp.y - wrist.y,
+        z: pinkyMcp.z - wrist.z,
+    };
+    const nx = vIndex.y * vPinky.z - vIndex.z * vPinky.y;
+    const ny = vIndex.z * vPinky.x - vIndex.x * vPinky.z;
+    const nz = vIndex.x * vPinky.y - vIndex.y * vPinky.x;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const n = { x: nx / len, y: ny / len, z: nz / len };
+
+    const baseZs = [lms[5].z, lms[9].z, lms[13].z, lms[17].z];
+    const tipZs = [lms[8].z, lms[12].z, lms[16].z, lms[20].z];
+    const avgBaseZ = baseZs.reduce((a, b) => a + b, 0) / baseZs.length;
+    const avgTipZ = tipZs.reduce((a, b) => a + b, 0) / tipZs.length;
+    const wristZ = wrist.z;
+
+    // Components
+    const normalTowardCamera = -n.z; // [-1..1]
+    const baseCloserScore = -(avgBaseZ - wristZ); // larger if bases closer than wrist
+    const tipsFartherScore = (avgTipZ - avgBaseZ); // larger if tips farther than bases
+
+    // Weighted sum; tune weights to keep magnitude around [-1,1]
+    let score = normalTowardCamera * 0.5 + baseCloserScore * 0.3 + tipsFartherScore * 0.2;
+
+    // Normalize with tanh to keep in [-1, 1]
+    score = Math.tanh(score);
+
+    if (handedness === 'Left') score = -score;
+    return score;
 }

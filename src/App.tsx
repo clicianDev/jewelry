@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment, Loader, Preload, Stats } from "@react-three/drei";
+import { Environment, Loader, Preload, Stats } from "@react-three/drei";
 import { Suspense } from "react";
 import * as THREE from "three";
 import Postprocessing from "@/components/three/Postprocessing";
@@ -35,7 +35,7 @@ export default function App() {
           <Preload all />
         </Suspense>
         {/* Camera controls tuned for product viewing */}
-        <OrbitControls maxDistance={200} minDistance={50} />
+        {/* <OrbitControls maxDistance={200} minDistance={50} /> */}
         {/* R3F default stats panel(FPS) */}
         <Stats/>
       </Canvas>
