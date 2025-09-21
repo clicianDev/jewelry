@@ -3,6 +3,7 @@ import { useHandStore } from "@/store/hands";
 import { FilesetResolver, HandLandmarker, type HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import type { Landmark } from "@/store/hands";
 import HandOverlay from "@/components/ui/HandOverlay";
+import { EmaValue, LandmarkSmoother } from "@/utils/smoothing";
 
 
 
@@ -22,6 +23,9 @@ export default function HandTracker() {
     const lastLogRef = useRef<number>(0);
     const lastOrientationRef = useRef<string | null>(null);
     const lastOrientationLogTs = useRef<number>(0);
+    // Smoothers
+    const landmarkSmootherRef = useRef(new LandmarkSmoother({ mode: "kalman", q: 1e-4, r: 2e-3 }));
+    const palmScoreEmaRef = useRef(new EmaValue(0.3));
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -134,10 +138,13 @@ export default function HandTracker() {
                     if(res?.landmarks?.length){
                         const first = res.landmarks[0];
                         const handed = res.handedness?.[0]?.[0]?.categoryName ?? null;
-                        setLandmarks(first.map((p) => ({ x: p.x, y: p.y, z: p.z })), handed);
+                        // Smooth landmarks
+                        const raw = first.map((p) => ({ x: p.x, y: p.y, z: p.z })) as Landmark[];
+                        const smoothed = landmarkSmootherRef.current.apply(raw);
+                        setLandmarks(smoothed, handed);
 
                         // Orientation detection (palm vs back) & log when it changes (rate-limited)
-                        const orientation = detectHandOrientation(first as unknown as Landmark[], lastOrientationRef.current, handed);
+                        const orientation = detectHandOrientation(smoothed as unknown as Landmark[], lastOrientationRef.current, handed);
                         if (orientation && orientation !== lastOrientationRef.current) {
                             const now = performance.now();
                             if (now - lastOrientationLogTs.current > 250) { // debounce window
@@ -148,8 +155,9 @@ export default function HandTracker() {
                             }
                         }
 
-                        // Compute a continuous palm score for subtle effects like ring tilt
-                        const score = computePalmScore(first as unknown as Landmark[], handed);
+                        // Compute and smooth continuous palm score for subtle effects like ring tilt
+                        const scoreRaw = computePalmScore(smoothed as unknown as Landmark[], handed);
+                        const score = palmScoreEmaRef.current.update(scoreRaw);
                         setPalmScore(score);
                     } else {
                         setLandmarks(null, null);
@@ -158,6 +166,9 @@ export default function HandTracker() {
                             lastOrientationRef.current = null;
                             setOrientation(null);
                         }
+                        // Reset smoothers when no hand
+                        landmarkSmootherRef.current.reset();
+                        palmScoreEmaRef.current.reset();
                     }
 
                     animationRef.current = requestAnimationFrame(loop);
@@ -309,8 +320,7 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
 
     // Hysteresis to avoid flicker: require stronger evidence to switch states
     const PALM_THRESHOLD = 0.4; // enter palm if score > this
-    const BACK_THRESHOLD = -0.05; // enter back if score < this
-    
+    const BACK_THRESHOLD = -0.4; // enter back if score < this
     let result: 'palm' | 'back';
     if (prev === 'palm') {
         result = palmScore < BACK_THRESHOLD ? 'back' : 'palm';
