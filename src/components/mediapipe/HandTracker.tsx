@@ -1,9 +1,25 @@
 import { useState, useRef, useEffect } from "react";
+import { useControls } from "leva";
 import { useHandStore } from "@/store/hands";
 import { FilesetResolver, HandLandmarker, type HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import type { Landmark } from "@/store/hands";
 import HandOverlay from "@/components/ui/HandOverlay";
 import { EmaValue, LandmarkSmoother } from "@/utils/smoothing";
+
+const AXIS_PRESETS = {
+    Responsive: { q: 0.006, r: 0.0035, maxQ: 0.15, adaptStrength: 70 },
+    Balanced: { q: 0.0025, r: 0.0014, maxQ: 0.07, adaptStrength: 45 },
+    Stable: { q: 0.0016, r: 0.001, maxQ: 0.04, adaptStrength: 32 },
+    UltraStable: { q: 0.0011, r: 0.0008, maxQ: 0.025, adaptStrength: 22 },
+} as const;
+
+type AxisPresetName = keyof typeof AXIS_PRESETS;
+const AXIS_PRESET_OPTIONS = Object.keys(AXIS_PRESETS) as AxisPresetName[];
+const DEFAULT_AXIS_PRESETS: { x: AxisPresetName; y: AxisPresetName; z: AxisPresetName } = {
+    x: "Responsive",
+    y: "Responsive",
+    z: "Stable",
+};
 
 
 
@@ -14,6 +30,8 @@ export default function HandTracker() {
     const [camError, setCamError] = useState<string | null>(null);
     const landmarks = useHandStore((state) => state.landmarks);
     const setLandmarks = useHandStore((state) => state.setLandmarks);
+    const landmarkBlend = useHandStore((state) => state.landmarkBlend);
+    const setLandmarkBlend = useHandStore((state) => state.setLandmarkBlend);
     const setOrientation = useHandStore((state) => state.setOrientation);
     const setVideoEl = useHandStore((state) => state.setVideoEl);
     const setPalmScore = useHandStore((state) => state.setPalmScore);
@@ -24,8 +42,123 @@ export default function HandTracker() {
     const lastOrientationRef = useRef<string | null>(null);
     const lastOrientationLogTs = useRef<number>(0);
     // Smoothers
-    const landmarkSmootherRef = useRef(new LandmarkSmoother({ mode: "kalman", q: 1e-4, r: 2e-3 }));
-    const palmScoreEmaRef = useRef(new EmaValue(0.3));
+    const landmarkSmootherRef = useRef(
+        new LandmarkSmoother({
+            mode: "adaptiveKalman",
+            q: [
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].q,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].q,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].q,
+            ],
+            r: [
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].r,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].r,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].r,
+            ],
+            adaptStrength: [
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].adaptStrength,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].adaptStrength,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].adaptStrength,
+            ],
+            maxQ: [
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].maxQ,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].maxQ,
+                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].maxQ,
+            ],
+        })
+    );
+    const palmScoreEmaRef = useRef(new EmaValue(0.6));
+
+    const trackingControls = useControls(
+        "Tracking",
+        () => ({
+            landmarkSmoothing: {
+                label: "Landmark smoothing",
+                value: landmarkBlend,
+                min: 0,
+                max: 1,
+                step: 0.05,
+                onChange: setLandmarkBlend,
+            },
+            presetX: {
+                label: "X axis preset",
+                value: DEFAULT_AXIS_PRESETS.x,
+                options: AXIS_PRESET_OPTIONS,
+            },
+            presetY: {
+                label: "Y axis preset",
+                value: DEFAULT_AXIS_PRESETS.y,
+                options: AXIS_PRESET_OPTIONS,
+            },
+            presetZ: {
+                label: "Z axis preset",
+                value: DEFAULT_AXIS_PRESETS.z,
+                options: AXIS_PRESET_OPTIONS,
+            },
+            adaptMultiplier: {
+                label: "Adaptive gain scale",
+                value: 1,
+                min: 0.4,
+                max: 2,
+                step: 0.05,
+            },
+            measurementScale: {
+                label: "Measurement noise scale",
+                value: 1,
+                min: 0.5,
+                max: 2,
+                step: 0.05,
+            },
+        }),
+        [landmarkBlend]
+    );
+
+    const {
+        presetX,
+        presetY,
+        presetZ,
+        adaptMultiplier,
+        measurementScale,
+    } = trackingControls as unknown as {
+        presetX: AxisPresetName;
+        presetY: AxisPresetName;
+        presetZ: AxisPresetName;
+        adaptMultiplier: number;
+        measurementScale: number;
+    };
+
+    useEffect(() => {
+        const resolvePreset = (value: AxisPresetName | string | undefined, axis: keyof typeof DEFAULT_AXIS_PRESETS): AxisPresetName => {
+            if (value && value in AXIS_PRESETS) {
+                return value as AxisPresetName;
+            }
+            return DEFAULT_AXIS_PRESETS[axis];
+        };
+
+        const safePresetNames = [
+            resolvePreset(presetX, "x"),
+            resolvePreset(presetY, "y"),
+            resolvePreset(presetZ, "z"),
+        ] as [AxisPresetName, AxisPresetName, AxisPresetName];
+
+        const safeMeasurement = Number.isFinite(measurementScale) ? Math.max(0.1, measurementScale) : 1;
+        const safeAdapt = Number.isFinite(adaptMultiplier) ? Math.max(0, adaptMultiplier) : 1;
+
+        const qVec = safePresetNames.map((name) => AXIS_PRESETS[name].q) as [number, number, number];
+        const rVec = safePresetNames.map((name) => AXIS_PRESETS[name].r * safeMeasurement) as [number, number, number];
+        const adaptVec = safePresetNames.map((name) => AXIS_PRESETS[name].adaptStrength * safeAdapt) as [number, number, number];
+        const maxQVec = safePresetNames.map((name) => AXIS_PRESETS[name].maxQ) as [number, number, number];
+        const minQVec = qVec.map((q) => q * 0.2) as [number, number, number];
+
+        landmarkSmootherRef.current.configure({
+            mode: "adaptiveKalman",
+            q: qVec,
+            r: rVec,
+            adaptStrength: adaptVec,
+            maxQ: maxQVec,
+            minQ: minQVec,
+        });
+    }, [presetX, presetY, presetZ, adaptMultiplier, measurementScale]);
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -141,7 +274,7 @@ export default function HandTracker() {
                         // Smooth landmarks
                         const raw = first.map((p) => ({ x: p.x, y: p.y, z: p.z })) as Landmark[];
                         const smoothed = landmarkSmootherRef.current.apply(raw);
-                        setLandmarks(smoothed, handed);
+                        setLandmarks(smoothed, handed, raw);
 
                         // Orientation detection (palm vs back) & log when it changes (rate-limited)
                         const orientation = detectHandOrientation(smoothed as unknown as Landmark[], lastOrientationRef.current, handed);
@@ -160,7 +293,7 @@ export default function HandTracker() {
                         const score = palmScoreEmaRef.current.update(scoreRaw);
                         setPalmScore(score);
                     } else {
-                        setLandmarks(null, null);
+                        setLandmarks(null, null, null);
                         setPalmScore(null);
                         if (lastOrientationRef.current !== null) {
                             lastOrientationRef.current = null;

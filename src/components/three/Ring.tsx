@@ -69,10 +69,11 @@ export default function Ring() {
   // Exposed user tuning controls (via Leva) to fine tune size & anchor without code edits.
   // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
   // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
-  const { fitAdjust, anchorToward14, alongFinger } = useControls('Ring Fit', {
+  const { fitAdjust, anchorToward14, alongFinger, positionSmoothing } = useControls('Ring Fit', {
     fitAdjust: { value: 1.10, min: 0.5, max: 1.6, step: 0.01 },
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
+    positionSmoothing: { value: 0, min: 0, max: 1, step: 0.05 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
   // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
@@ -174,7 +175,7 @@ export default function Ring() {
   }, [scene]);
 
   useFrame((_, delta) => {
-    const lms = landmarks;
+  const lms = landmarks;
     if (lms && lms.length >= 21 && group.current) {
   // Weighted midpoint between ring finger MCP (13) and PIP (14) with bias toward 13 (base of finger)
   const p13 = lms[13]; // ring finger MCP
@@ -198,12 +199,18 @@ export default function Ring() {
       // Place the ring at a fixed distance in front of camera along ray
       const distance = BASE_DISTANCE; // base depth in world units
       pos.current.copy(camera.position).add(dir.current.multiplyScalar(distance));
-      // Exponential smoothing toward new position (snappy, reduced lag)
-      const posAlpha = 1 - Math.exp(-POSITION_DAMP * delta);
-      if (smoothedPosition.current.lengthSq() === 0) {
+
+      const SMOOTH_EPS = 1e-3;
+      const smoothing = positionSmoothing ?? 0;
+      if (smoothing <= SMOOTH_EPS) {
         smoothedPosition.current.copy(pos.current);
       } else {
-        smoothedPosition.current.lerp(pos.current, posAlpha);
+        const posAlpha = 1 - Math.exp(-POSITION_DAMP * smoothing * delta);
+        if (smoothedPosition.current.lengthSq() === 0) {
+          smoothedPosition.current.copy(pos.current);
+        } else {
+          smoothedPosition.current.lerp(pos.current, posAlpha);
+        }
       }
       group.current.position.copy(smoothedPosition.current);
 
