@@ -37,6 +37,8 @@ export default function HandTracker() {
     const setPalmScore = useHandStore((state) => state.setPalmScore);
     const landmarkerRef = useRef<HandLandmarker | null>(null);
     const animationRef = useRef<number | null>(null);
+    const lastFrameTimeRef = useRef<number | null>(null);
+    const prevRawLandmarksRef = useRef<Landmark[] | null>(null);
     const fpsTimes = useRef<number[]>([]); // For FPS calculation
     const lastLogRef = useRef<number>(0);
     const lastOrientationRef = useRef<string | null>(null);
@@ -224,6 +226,11 @@ export default function HandTracker() {
                 const loop = () => {
                     if(!videoRef.current || !landmarkerRef.current) return;
                     const nowMs = performance.now();
+                    const prevFrameTime = lastFrameTimeRef.current;
+                    const deltaTime = prevFrameTime
+                        ? Math.max((nowMs - prevFrameTime) / 1000, 1 / 240)
+                        : 1 / 60;
+                    lastFrameTimeRef.current = nowMs;
                     const res: HandLandmarkerResult = landmarkerRef.current.detectForVideo(
                         videoRef.current,
                         nowMs
@@ -274,7 +281,15 @@ export default function HandTracker() {
                         // Smooth landmarks
                         const raw = first.map((p) => ({ x: p.x, y: p.y, z: p.z })) as Landmark[];
                         const smoothed = landmarkSmootherRef.current.apply(raw);
-                        setLandmarks(smoothed, handed, raw);
+                        const compensated = applyLagCompensation({
+                            smoothed,
+                            raw,
+                            prevRaw: prevRawLandmarksRef.current,
+                            deltaTime,
+                        });
+
+                        setLandmarks(compensated, handed, raw);
+                        prevRawLandmarksRef.current = cloneLandmarks(raw);
 
                         // Orientation detection (palm vs back) & log when it changes (rate-limited)
                         const orientation = detectHandOrientation(smoothed as unknown as Landmark[], lastOrientationRef.current, handed);
@@ -302,6 +317,8 @@ export default function HandTracker() {
                         // Reset smoothers when no hand
                         landmarkSmootherRef.current.reset();
                         palmScoreEmaRef.current.reset();
+                        prevRawLandmarksRef.current = null;
+                        lastFrameTimeRef.current = null;
                     }
 
                     animationRef.current = requestAnimationFrame(loop);
@@ -465,6 +482,74 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
     }
 
     return result;
+}
+
+type LagCompensationArgs = {
+    smoothed: Landmark[];
+    raw: Landmark[];
+    prevRaw: Landmark[] | null;
+    deltaTime: number;
+};
+
+function applyLagCompensation({ smoothed, raw, prevRaw, deltaTime }: LagCompensationArgs): Landmark[] {
+    if (!smoothed || !raw || smoothed.length !== raw.length) {
+        return cloneLandmarks(smoothed);
+    }
+
+    if (!prevRaw || prevRaw.length !== raw.length || !Number.isFinite(deltaTime) || deltaTime <= 0) {
+        return cloneLandmarks(smoothed);
+    }
+
+    const out: Landmark[] = new Array(smoothed.length);
+    const baseLeadMs = 22; // desired phase lead to counter smoothing latency (~22ms)
+    const frameMs = Math.max(deltaTime * 1000, 4);
+    const leadGain = clampNumber(baseLeadMs / frameMs, 0.45, 1.25);
+    const maxOffset = 0.045;
+    const maxOffsetZ = 0.08;
+    const motionThreshold = 0.0012;
+
+    for (let i = 0; i < smoothed.length; i++) {
+        const smooth = smoothed[i];
+        const curr = raw[i];
+        const prev = prevRaw[i];
+        if (!smooth || !curr || !prev) {
+            out[i] = smooth ? { ...smooth } : curr ? { ...curr } : { x: 0, y: 0, z: 0 };
+            continue;
+        }
+
+        const dx = curr.x - prev.x;
+        const dy = curr.y - prev.y;
+        const dz = curr.z - prev.z;
+
+        const planarMotion = Math.hypot(dx, dy);
+        if (planarMotion < motionThreshold) {
+            out[i] = { ...smooth };
+            continue;
+        }
+
+        const dynamicBoost = clampNumber(planarMotion / 0.02, 0, 1);
+        const gain = leadGain * (0.45 + 0.55 * dynamicBoost);
+
+        const offsetX = clampNumber(dx * gain, -maxOffset, maxOffset);
+        const offsetY = clampNumber(dy * gain, -maxOffset, maxOffset);
+        const offsetZ = clampNumber(dz * gain * 0.85, -maxOffsetZ, maxOffsetZ);
+
+        out[i] = {
+            x: clampNumber(smooth.x + offsetX, 0, 1),
+            y: clampNumber(smooth.y + offsetY, 0, 1),
+            z: clampNumber(smooth.z + offsetZ, -1, 1),
+        };
+    }
+
+    return out;
+}
+
+function cloneLandmarks(list: Landmark[]): Landmark[] {
+    return list.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+}
+
+function clampNumber(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
 }
 
 // Continuous palm score in range roughly [-1, 1]:
