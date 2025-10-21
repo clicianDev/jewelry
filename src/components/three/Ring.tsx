@@ -56,6 +56,8 @@ export default function Ring() {
   const prevFilteredAnchorNorm = useRef({ x: 0, y: 0 });
   const rawAnchorInitialized = useRef(false);
   const filteredAnchorInitialized = useRef(false);
+  const microAnchorNorm = useRef(new THREE.Vector2());
+  const microAnchorInitialized = useRef(false);
 
   // Tuning
   // ---------------- Scaling Tuning ----------------
@@ -82,6 +84,13 @@ export default function Ring() {
   // Fit factor > 1 means leave some slack so ring doesn't intersect finger mesh visually.
   const SNUG_FIT = 0.72; // slightly looser so model doesn't appear too small
 
+  // Motion-adaptive smoothing: attenuate filtering when the anchor moves quickly to keep latency low.
+  const MOTION_ATTENUATION_THRESHOLD = 0.003; // normalized screen distance ~ quick finger twitch
+  const MOTION_ATTENUATION_POWER = 0.85; // how aggressively smoothing drops with motion
+  const MOTION_ATTENUATION_MIN = 0.18; // floor so we never fully disable damping
+  const WORLD_SPEED_ATTENUATION_GAIN = 0.04; // scales world velocity into 0..1 attenuation factor
+  const WORLD_SPEED_ATTENUATION_POWER = 0.75;
+
   // Exposed user tuning controls (via Leva) to fine tune size & anchor without code edits.
   // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
   // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
@@ -90,10 +99,10 @@ export default function Ring() {
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
     positionSmoothing: { label: "Smoothing Amount", value: 0, min: 0, max: 1, step: 0.05 },
-    motionLookaheadMs: { label: "Lookahead (ms)", value: 0, min: 0, max: 150, step: 5 },
-    jitterBlend: { label: "Stabilized Blend", value: 0., min: 0, max: 1, step: 0.05 },
-    jitterVelocityCutoff: { label: "Blend Cutoff", value: 0, min: 0.001, max: 0.1, step: 0.001 },
-    jitterDeadzone: { label: "Jitter Deadzone", value: 0.01, min: 0, max: 0.01, step: 0.0005 },
+    motionLookaheadMs: { label: "Lookahead (ms)", value: 8, min: 0, max: 150, step: 5 },
+    jitterBlend: { label: "Stabilized Blend", value: 0.35, min: 0, max: 1, step: 0.05 },
+    jitterVelocityCutoff: { label: "Blend Cutoff", value: 0.02, min: 0.001, max: 0.1, step: 0.001 },
+    jitterDeadzone: { label: "Jitter Deadzone", value: 0.0025, min: 0, max: 0.015, step: 0.0005 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
   // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
@@ -205,10 +214,27 @@ export default function Ring() {
 
       const smoothingStrength = positionSmoothing ?? 0;
       const SMOOTH_EPS = 1e-3;
-      const computeAlpha = (response: number) =>
-        smoothingStrength <= SMOOTH_EPS
-          ? 1
-          : 1 - Math.exp(-response * Math.max(smoothingStrength, SMOOTH_EPS) * delta);
+      const computeAlpha = (
+        response: number,
+        baseStrength = 0,
+        attenuation = 1
+      ) => {
+        const sliderStrength = THREE.MathUtils.clamp(smoothingStrength ?? 0, 0, 1);
+        const combinedStrength = Math.max(baseStrength, sliderStrength);
+        if (combinedStrength <= SMOOTH_EPS) {
+          return 1;
+        }
+
+        const clampedStrength = THREE.MathUtils.clamp(combinedStrength, SMOOTH_EPS, 1);
+        const baseAlpha = 1 - Math.exp(-response * clampedStrength * delta);
+
+        const attenuationBoost = THREE.MathUtils.clamp(1 - attenuation, 0, 1);
+        if (attenuationBoost <= SMOOTH_EPS) {
+          return baseAlpha;
+        }
+
+        return THREE.MathUtils.lerp(baseAlpha, 1, attenuationBoost);
+      };
   const nowTs = typeof performance !== "undefined" ? performance.now() : Date.now();
   const dataAgeMs = landmarksTimestamp != null ? Math.max(0, nowTs - landmarksTimestamp) : 0;
       const lookaheadMs = Math.max(0, motionLookaheadMs ?? 0) + dataAgeMs;
@@ -227,6 +253,7 @@ export default function Ring() {
       }
 
       let rawDelta = 0;
+      let smoothingAttenuation = 1;
       if (!rawAnchorInitialized.current) {
         rawAnchorInitialized.current = true;
         prevRawAnchorNorm.current.x = rawAnchorX;
@@ -239,6 +266,19 @@ export default function Ring() {
       }
       prevRawAnchorNorm.current.x = rawAnchorX;
       prevRawAnchorNorm.current.y = rawAnchorY;
+
+      if (rawDelta > 0) {
+        const motionFactorNorm = THREE.MathUtils.clamp(
+          rawDelta / MOTION_ATTENUATION_THRESHOLD,
+          0,
+          1
+        );
+        const motionIntensity = Math.pow(motionFactorNorm, 0.9);
+        smoothingAttenuation = Math.max(
+          MOTION_ATTENUATION_MIN,
+          1 - motionIntensity * MOTION_ATTENUATION_POWER
+        );
+      }
 
       let anchorX = rawAnchorX;
       let anchorY = rawAnchorY;
@@ -270,14 +310,15 @@ export default function Ring() {
       if (!filteredAnchorInitialized.current) {
         filteredAnchorInitialized.current = true;
       } else {
-        const diff = Math.hypot(
-          anchorX - prevFilteredAnchorNorm.current.x,
-          anchorY - prevFilteredAnchorNorm.current.y
-        );
+        const deltaX = anchorX - prevFilteredAnchorNorm.current.x;
+        const deltaY = anchorY - prevFilteredAnchorNorm.current.y;
+        const diff = Math.hypot(deltaX, deltaY);
         if (deadzone > 0) {
           if (diff < deadzone) {
-            filteredX = prevFilteredAnchorNorm.current.x;
-            filteredY = prevFilteredAnchorNorm.current.y;
+            const softness = THREE.MathUtils.clamp(diff / Math.max(deadzone, 1e-6), 0, 1);
+            const eased = softness * softness * (3 - 2 * softness);
+            filteredX = prevFilteredAnchorNorm.current.x + deltaX * eased;
+            filteredY = prevFilteredAnchorNorm.current.y + deltaY * eased;
           } else if (diff < deadzone * 3) {
             const t = (diff - deadzone) / (deadzone * 2);
             const eased = THREE.MathUtils.clamp(t, 0, 1);
@@ -286,11 +327,30 @@ export default function Ring() {
           }
         }
       }
-      prevFilteredAnchorNorm.current.x = filteredX;
-      prevFilteredAnchorNorm.current.y = filteredY;
 
-      const mirroredX = 1 - filteredX; // account for mirrored video
-      ndc.current.set(mirroredX * 2 - 1, -(filteredY * 2 - 1), 0.5);
+      if (!microAnchorInitialized.current) {
+        microAnchorNorm.current.set(filteredX, filteredY);
+        microAnchorInitialized.current = true;
+      } else {
+        const microDx = filteredX - microAnchorNorm.current.x;
+        const microDy = filteredY - microAnchorNorm.current.y;
+        const microDist = Math.hypot(microDx, microDy);
+        const microThreshold = Math.max(0.00035, deadzone * 0.35);
+        const ratio = microThreshold > 0 ? THREE.MathUtils.clamp(microDist / microThreshold, 0, 1) : 1;
+        const speedMultiplier = microDist > microThreshold ? 1 : ratio * ratio;
+        const followRate = microDist > microThreshold ? 165 : 110;
+        const alphaMicro = 1 - Math.exp(-followRate * Math.max(speedMultiplier, 0.07) * delta);
+        microAnchorNorm.current.x += microDx * alphaMicro;
+        microAnchorNorm.current.y += microDy * alphaMicro;
+      }
+
+      const anchorNormX = microAnchorNorm.current.x;
+      const anchorNormY = microAnchorNorm.current.y;
+      prevFilteredAnchorNorm.current.x = anchorNormX;
+      prevFilteredAnchorNorm.current.y = anchorNormY;
+
+      const mirroredX = 1 - anchorNormX; // account for mirrored video
+      ndc.current.set(mirroredX * 2 - 1, -(anchorNormY * 2 - 1), 0.5);
       // Unproject from NDC to world: create a ray from camera through ndc
       ndc.current.unproject(camera);
       dir.current.copy(ndc.current).sub(camera.position).normalize();
@@ -298,7 +358,7 @@ export default function Ring() {
       // Approximate depth using MediaPipe z so the ring stays glued when the hand leans
       const depthOffset = THREE.MathUtils.clamp(p13.z, -0.6, 0.6) * DEPTH_RANGE;
       const targetDistance = BASE_DISTANCE + depthOffset;
-      const depthAlpha = computeAlpha(DEPTH_RESPONSE);
+  const depthAlpha = computeAlpha(DEPTH_RESPONSE, 0.28, smoothingAttenuation);
       smoothedDistance.current = THREE.MathUtils.lerp(
         smoothedDistance.current,
         targetDistance,
@@ -323,17 +383,26 @@ export default function Ring() {
         if (lookaheadSeconds > 0) {
           pos.current.addScaledVector(anchorVelocity.current, lookaheadSeconds);
         }
+        const worldSpeed = anchorVelocity.current.length();
+        if (worldSpeed > 0) {
+          const worldFactor = THREE.MathUtils.clamp(
+            worldSpeed * WORLD_SPEED_ATTENUATION_GAIN,
+            0,
+            1
+          );
+          const worldAttenuation = Math.max(
+            MOTION_ATTENUATION_MIN,
+            1 - worldFactor * WORLD_SPEED_ATTENUATION_POWER
+          );
+          smoothingAttenuation = Math.min(smoothingAttenuation, worldAttenuation);
+        }
       }
 
-      if (smoothingStrength <= SMOOTH_EPS) {
+  const posAlpha = computeAlpha(POSITION_DAMP, 0.26, smoothingAttenuation);
+      if (smoothedPosition.current.lengthSq() === 0 || posAlpha >= 0.999) {
         smoothedPosition.current.copy(pos.current);
       } else {
-        const posAlpha = computeAlpha(POSITION_DAMP);
-        if (smoothedPosition.current.lengthSq() === 0) {
-          smoothedPosition.current.copy(pos.current);
-        } else {
-          smoothedPosition.current.lerp(pos.current, posAlpha);
-        }
+        smoothedPosition.current.lerp(pos.current, posAlpha);
       }
       group.current.position.copy(smoothedPosition.current);
 
@@ -342,7 +411,7 @@ export default function Ring() {
       const dySeg = p13.y - p14.y;
       const segmentLenNorm = Math.sqrt(dxSeg * dxSeg + dySeg * dySeg);
       const rawDiameterNorm = segmentLenNorm * FINGER_DIAMETER_TO_SEGMENT_RATIO;
-      const widthAlpha = computeAlpha(WIDTH_RESPONSE);
+  const widthAlpha = computeAlpha(WIDTH_RESPONSE, 0.22, smoothingAttenuation);
       smoothedFingerDiameterNorm.current =
         smoothedFingerDiameterNorm.current == null
           ? rawDiameterNorm
@@ -373,7 +442,7 @@ export default function Ring() {
           SCALE_MIN,
           SCALE_MAX
         );
-        const scaleAlpha = computeAlpha(SCALE_RESPONSE);
+  const scaleAlpha = computeAlpha(SCALE_RESPONSE, 0.24, smoothingAttenuation);
         targetScale.current = THREE.MathUtils.lerp(
           targetScale.current,
           fitScale,
@@ -391,7 +460,7 @@ export default function Ring() {
       const targetAngle = -segAngle + 0.5;
       const curr = viewAxisAngle.current;
       const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI;
-      const angleAlpha = computeAlpha(ORIENTATION_RESPONSE);
+  const angleAlpha = computeAlpha(ORIENTATION_RESPONSE, 0.22, smoothingAttenuation);
       viewAxisAngle.current = curr + diff * angleAlpha;
       group.current.rotation.z = viewAxisAngle.current;
 
@@ -408,7 +477,7 @@ export default function Ring() {
           : 0;
         const sign = handedness?.toLowerCase() === "left" ? -1 : 1;
         const targetTilt = score * TILT_MAX_RAD * sign;
-        const tiltAlpha = computeAlpha(TILT_RESPONSE);
+  const tiltAlpha = computeAlpha(TILT_RESPONSE, 0.2, smoothingAttenuation);
         if (orientation === "back") {
           tiltX.current = THREE.MathUtils.lerp(tiltX.current, targetTilt, tiltAlpha);
           const rx =
@@ -453,6 +522,9 @@ export default function Ring() {
       anchorInitialized.current = false;
       smoothedFingerDiameterNorm.current = null;
       smoothedDistance.current = BASE_DISTANCE;
+      rawAnchorInitialized.current = false;
+      filteredAnchorInitialized.current = false;
+      microAnchorInitialized.current = false;
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
       group.current.rotation.y += delta * 0.6;
