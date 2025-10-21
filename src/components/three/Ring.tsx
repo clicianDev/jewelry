@@ -7,6 +7,23 @@ import { useHandStore } from "@/store/hands";
 
 import ringUrl from "@/assets/diamond_ring.glb";
 
+type Vec3Like = { x: number; y: number; z: number };
+
+const FINGER_CHAINS = [
+  [5, 6, 7, 8],
+  [9, 10, 11, 12],
+  [13, 14, 15, 16],
+  [17, 18, 19, 20],
+] as const;
+
+function distance3(a: Vec3Like, b: Vec3Like) {
+  return Math.sqrt(
+    (a.x - b.x) * (a.x - b.x) +
+      (a.y - b.y) * (a.y - b.y) +
+      (a.z - b.z) * (a.z - b.z)
+  );
+}
+
 export default function Ring() {
   const group = useRef<THREE.Group>(null!);
   const { scene } = useGLTF(ringUrl);
@@ -58,6 +75,7 @@ export default function Ring() {
   const filteredAnchorInitialized = useRef(false);
   const microAnchorNorm = useRef(new THREE.Vector2());
   const microAnchorInitialized = useRef(false);
+  const smoothedHandClosure = useRef(0);
 
   // Tuning
   // ---------------- Scaling Tuning ----------------
@@ -73,6 +91,7 @@ export default function Ring() {
   const SCALE_MIN = 0.05; // allow a little smaller now
   const SCALE_MAX = 3.5;
   const smoothedDistance = useRef(BASE_DISTANCE);
+  const CLOSURE_RESPONSE = 70; // how quickly hand closure influences rotation offset
 
   // Model calibration: estimate ratio (inner_diameter / measured_box_diameter)
   // If your model's bounding box covers outer metal thickness, inner hole is smaller.
@@ -103,6 +122,14 @@ export default function Ring() {
     jitterBlend: { label: "Stabilized Blend", value: 0.35, min: 0, max: 1, step: 0.05 },
     jitterVelocityCutoff: { label: "Blend Cutoff", value: 0.02, min: 0.001, max: 0.1, step: 0.001 },
     jitterDeadzone: { label: "Jitter Deadzone", value: 0.0025, min: 0, max: 0.015, step: 0.0005 },
+  });
+  const { rotationOffsetX, rotationOffsetY, rotationOffsetZ, closureOffsetZ, positionOffsetZ, closureOffsetPositionZ } = useControls('Ring Orientation', {
+    rotationOffsetX: { label: "Offset X (°)", value: 0, min: -180, max: 180, step: 0.5 },
+    rotationOffsetY: { label: "Offset Y (°)", value: 0, min: -180, max: 180, step: 0.5 },
+    rotationOffsetZ: { label: "Offset Z (°)", value: 0, min: -180, max: 180, step: 0.5 },
+    closureOffsetZ: { label: "Close Adjust Z (°)", value: 80, min: 0, max: 90, step: 0.5 },
+    positionOffsetZ: { label: "Base Pos Z", value: -5.4, min: -20, max: 20, step: 0.05 },
+    closureOffsetPositionZ: { label: "Close Adjust Pos", value: 1.5, min: 0, max: 10, step: 0.05 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
   // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
@@ -465,6 +492,44 @@ export default function Ring() {
       group.current.rotation.z = viewAxisAngle.current;
 
       if (userRotationGroup.current) {
+        const offsetXRad = THREE.MathUtils.degToRad(rotationOffsetX);
+        const offsetYRad = THREE.MathUtils.degToRad(rotationOffsetY);
+        const offsetZRad = THREE.MathUtils.degToRad(rotationOffsetZ);
+        const closureOffsetZRad = THREE.MathUtils.degToRad(closureOffsetZ);
+        let closureTotal = 0;
+        let closureCount = 0;
+        for (const chain of FINGER_CHAINS) {
+          const [mcpIdx, pipIdx, dipIdx, tipIdx] = chain;
+          const mcp = lms[mcpIdx];
+          const pip = lms[pipIdx];
+          const dip = lms[dipIdx];
+          const tip = lms[tipIdx];
+          if (!mcp || !pip || !dip || !tip) continue;
+          const fingerLength =
+            distance3(mcp, pip) + distance3(pip, dip) + distance3(dip, tip);
+          if (fingerLength <= 1e-4) continue;
+          const spread = distance3(mcp, tip) / fingerLength;
+          const curl = THREE.MathUtils.clamp(1 - spread, 0, 1);
+          closureTotal += curl;
+          closureCount++;
+        }
+        const closureRaw = closureCount > 0 ? closureTotal / closureCount : 0;
+        const closureAlpha = computeAlpha(CLOSURE_RESPONSE, 0.18, smoothingAttenuation);
+        smoothedHandClosure.current = THREE.MathUtils.lerp(
+          smoothedHandClosure.current,
+          closureRaw,
+          closureAlpha
+        );
+        const closureZ =
+          orientation === "back"
+            ? closureOffsetZRad * smoothedHandClosure.current
+            : 0;
+        const basePosZ = positionOffsetZ;
+        const closurePosZ =
+          orientation === "back"
+            ? -closureOffsetPositionZ * smoothedHandClosure.current
+            : 0;
+        userRotationGroup.current.position.z = basePosZ + closurePosZ;
         const TILT_MAX_RAD = THREE.MathUtils.degToRad(35);
         const SCORE_EPS = 0.12;
         const hasScore = palmScore != null && Math.abs(palmScore) > SCORE_EPS;
@@ -483,12 +548,16 @@ export default function Ring() {
           const rx =
             THREE.MathUtils.degToRad(
               handedness?.toLowerCase() === "left" ? -65.0 : -128.0
-            ) + tiltX.current * 10;
-          const ry = THREE.MathUtils.degToRad(0);
-          const rz = THREE.MathUtils.degToRad(0);
+            ) + tiltX.current * 10 + offsetXRad;
+          const ry = offsetYRad;
+          const rz = offsetZRad - closureZ;
           userRotationGroup.current.rotation.set(rx, ry, rz);
         } else {
-          userRotationGroup.current.rotation.set(1, 0, 0);
+          userRotationGroup.current.rotation.set(
+            1 + offsetXRad,
+            offsetYRad,
+            offsetZRad
+          );
         }
       }
 
@@ -525,9 +594,13 @@ export default function Ring() {
       rawAnchorInitialized.current = false;
       filteredAnchorInitialized.current = false;
       microAnchorInitialized.current = false;
+      smoothedHandClosure.current = 0;
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
       group.current.rotation.y += delta * 0.6;
+      if (userRotationGroup.current) {
+        userRotationGroup.current.position.z = positionOffsetZ;
+      }
     }
   });
   return (
