@@ -4,22 +4,11 @@ import { useHandStore } from "@/store/hands";
 import { FilesetResolver, HandLandmarker, type HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import type { Landmark } from "@/store/hands";
 import HandOverlay from "@/components/ui/HandOverlay";
-import { EmaValue, LandmarkSmoother } from "@/utils/smoothing";
+import { EmaValue, LandmarkStabilizer } from "@/utils/stabilization";
 
-const AXIS_PRESETS = {
-    Responsive: { q: 0.006, r: 0.0035, maxQ: 0.15, adaptStrength: 70 },
-    Balanced: { q: 0.0025, r: 0.0014, maxQ: 0.07, adaptStrength: 45 },
-    Stable: { q: 0.0016, r: 0.001, maxQ: 0.04, adaptStrength: 32 },
-    UltraStable: { q: 0.0011, r: 0.0008, maxQ: 0.025, adaptStrength: 22 },
-} as const;
-
-type AxisPresetName = keyof typeof AXIS_PRESETS;
-const AXIS_PRESET_OPTIONS = Object.keys(AXIS_PRESETS) as AxisPresetName[];
-const DEFAULT_AXIS_PRESETS: { x: AxisPresetName; y: AxisPresetName; z: AxisPresetName } = {
-    x: "Responsive",
-    y: "Responsive",
-    z: "Stable",
-};
+type StabilizationMode = 'responsive' | 'balanced' | 'stable';
+const STABILIZATION_MODE_OPTIONS: StabilizationMode[] = ['responsive', 'balanced', 'stable'];
+const DEFAULT_STABILIZATION_MODE: StabilizationMode = 'responsive';
 
 
 
@@ -43,124 +32,95 @@ export default function HandTracker() {
     const lastLogRef = useRef<number>(0);
     const lastOrientationRef = useRef<string | null>(null);
     const lastOrientationLogTs = useRef<number>(0);
-    // Smoothers
-    const landmarkSmootherRef = useRef(
-        new LandmarkSmoother({
-            mode: "adaptiveKalman",
-            q: [
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].q,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].q,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].q,
-            ],
-            r: [
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].r,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].r,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].r,
-            ],
-            adaptStrength: [
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].adaptStrength,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].adaptStrength,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].adaptStrength,
-            ],
-            maxQ: [
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.x].maxQ,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.y].maxQ,
-                AXIS_PRESETS[DEFAULT_AXIS_PRESETS.z].maxQ,
-            ],
-        })
+    // Stabilizers
+    const landmarkStabilizerRef = useRef(
+        new LandmarkStabilizer(DEFAULT_STABILIZATION_MODE)
     );
     const palmScoreEmaRef = useRef(new EmaValue(0.6));
 
     const trackingControls = useControls(
         "Tracking",
         () => ({
-            landmarkSmoothing: {
-                label: "Landmark smoothing",
+            stabilizationMode: {
+                label: "Stabilization Mode",
+                value: DEFAULT_STABILIZATION_MODE,
+                options: STABILIZATION_MODE_OPTIONS,
+            },
+            landmarkBlending: {
+                label: "Raw/Stabilized Blend",
                 value: landmarkBlend,
                 min: 0,
-                max: 1,
+                max: 1.00,
                 step: 0.05,
                 onChange: setLandmarkBlend,
             },
-            presetX: {
-                label: "X axis preset",
-                value: DEFAULT_AXIS_PRESETS.x,
-                options: AXIS_PRESET_OPTIONS,
+            deadZone: {
+                label: "Dead Zone (jitter filter)",
+                value: 0,
+                min: 0,
+                max: 0.003,
+                step: 0.0001,
             },
-            presetY: {
-                label: "Y axis preset",
-                value: DEFAULT_AXIS_PRESETS.y,
-                options: AXIS_PRESET_OPTIONS,
+            jitterThreshold: {
+                label: "Jitter Threshold",
+                value: 0.005,
+                min: 0.0005,
+                max: 0.005,
+                step: 0.0001,
             },
-            presetZ: {
-                label: "Z axis preset",
-                value: DEFAULT_AXIS_PRESETS.z,
-                options: AXIS_PRESET_OPTIONS,
-            },
-            adaptMultiplier: {
-                label: "Adaptive gain scale",
-                value: 1,
-                min: 0.4,
-                max: 2,
+            predictionStrength: {
+                label: "Prediction Strength",
+                value: 0.5,
+                min: 0,
+                max: 0.5,
                 step: 0.05,
             },
-            measurementScale: {
-                label: "Measurement noise scale",
-                value: 1,
+            oneEuroMinCutoff: {
+                label: "One Euro Min Cutoff",
+                value: 5,
                 min: 0.5,
-                max: 2,
-                step: 0.05,
+                max: 5,
+                step: 0.1,
+            },
+            oneEuroBeta: {
+                label: "One Euro Beta",
+                value: 0.02,
+                min: 0.001,
+                max: 0.02,
+                step: 0.001,
             },
         }),
         [landmarkBlend]
     );
 
     const {
-        presetX,
-        presetY,
-        presetZ,
-        adaptMultiplier,
-        measurementScale,
+        stabilizationMode,
+        deadZone,
+        jitterThreshold,
+        predictionStrength,
+        oneEuroMinCutoff,
+        oneEuroBeta,
     } = trackingControls as unknown as {
-        presetX: AxisPresetName;
-        presetY: AxisPresetName;
-        presetZ: AxisPresetName;
-        adaptMultiplier: number;
-        measurementScale: number;
+        stabilizationMode: StabilizationMode;
+        deadZone: number;
+        jitterThreshold: number;
+        predictionStrength: number;
+        oneEuroMinCutoff: number;
+        oneEuroBeta: number;
     };
 
     useEffect(() => {
-        const resolvePreset = (value: AxisPresetName | string | undefined, axis: keyof typeof DEFAULT_AXIS_PRESETS): AxisPresetName => {
-            if (value && value in AXIS_PRESETS) {
-                return value as AxisPresetName;
+        landmarkStabilizerRef.current.configure(
+            stabilizationMode,
+            {
+                deadZone,
+                jitterThreshold,
+                predictionStrength,
+                oneEuroMinCutoff,
+                oneEuroBeta,
             }
-            return DEFAULT_AXIS_PRESETS[axis];
-        };
-
-        const safePresetNames = [
-            resolvePreset(presetX, "x"),
-            resolvePreset(presetY, "y"),
-            resolvePreset(presetZ, "z"),
-        ] as [AxisPresetName, AxisPresetName, AxisPresetName];
-
-        const safeMeasurement = Number.isFinite(measurementScale) ? Math.max(0.1, measurementScale) : 1;
-        const safeAdapt = Number.isFinite(adaptMultiplier) ? Math.max(0, adaptMultiplier) : 1;
-
-        const qVec = safePresetNames.map((name) => AXIS_PRESETS[name].q) as [number, number, number];
-        const rVec = safePresetNames.map((name) => AXIS_PRESETS[name].r * safeMeasurement) as [number, number, number];
-        const adaptVec = safePresetNames.map((name) => AXIS_PRESETS[name].adaptStrength * safeAdapt) as [number, number, number];
-        const maxQVec = safePresetNames.map((name) => AXIS_PRESETS[name].maxQ) as [number, number, number];
-        const minQVec = qVec.map((q) => q * 0.2) as [number, number, number];
-
-        landmarkSmootherRef.current.configure({
-            mode: "adaptiveKalman",
-            q: qVec,
-            r: rVec,
-            adaptStrength: adaptVec,
-            maxQ: maxQVec,
-            minQ: minQVec,
-        });
-    }, [presetX, presetY, presetZ, adaptMultiplier, measurementScale]);
+        );
+    }, [stabilizationMode, deadZone, jitterThreshold, predictionStrength, oneEuroMinCutoff, oneEuroBeta]);
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -177,6 +137,7 @@ export default function HandTracker() {
                 const landmarker = await HandLandmarker.createFromOptions(fileset, {
                     baseOptions: {
                         modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                        delegate: "GPU",
                     },
                     runningMode: "VIDEO",
                     numHands: 1,
@@ -190,7 +151,12 @@ export default function HandTracker() {
                 }
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: "user" },
+                        video: {
+                            facingMode: "user",
+                            width: { ideal: 640 },
+                            height: { ideal: 480 },
+                            frameRate: { ideal: 60, max: 60 },
+                        },
                         audio: false,
                     });
                 } catch (err) {
@@ -226,10 +192,6 @@ export default function HandTracker() {
                 const loop = () => {
                     if(!videoRef.current || !landmarkerRef.current) return;
                     const nowMs = performance.now();
-                    const prevFrameTime = lastFrameTimeRef.current;
-                    const deltaTime = prevFrameTime
-                        ? Math.max((nowMs - prevFrameTime) / 1000, 1 / 240)
-                        : 1 / 60;
                     lastFrameTimeRef.current = nowMs;
                     const res: HandLandmarkerResult = landmarkerRef.current.detectForVideo(
                         videoRef.current,
@@ -250,21 +212,6 @@ export default function HandTracker() {
                             ctx.drawImage(videoRef.current, 0, 0, w, h);
                             ctx.restore();
 
-                            if(res?.landmarks?.length){
-                                res.landmarks.forEach((hand, i) => {
-                                    const handed = res.handedness?.[i]?.[0]?.categoryName || "unknown";
-                                    const color = handed === "Left" ? "green" : handed === "Right" ? "purple" : "white";
-                                    ctx.fillStyle = color;
-                                    hand.forEach((p) => {
-                                        const x = (1 - p.x) * w; // flip x because of mirrored
-                                        const y = p.y * h;
-                                        ctx.beginPath();
-                                        ctx.arc(x, y, 4, 0, Math.PI * 2);
-                                        ctx.fill();
-                                    });
-                                });
-                            }
-
                             //Custom FPS calculation and logging for accuracy
 
                             computeAndLogFps(nowMs, fpsTimes.current, lastLogRef);
@@ -278,21 +225,16 @@ export default function HandTracker() {
                     if(res?.landmarks?.length){
                         const first = res.landmarks[0];
                         const handed = res.handedness?.[0]?.[0]?.categoryName ?? null;
-                        // Smooth landmarks
+                        // Stabilize landmarks (no lag compensation needed - stabilization is low-latency by design)
                         const raw = first.map((p) => ({ x: p.x, y: p.y, z: p.z })) as Landmark[];
-                        const smoothed = landmarkSmootherRef.current.apply(raw);
-                        const compensated = applyLagCompensation({
-                            smoothed,
-                            raw,
-                            prevRaw: prevRawLandmarksRef.current,
-                            deltaTime,
-                        });
+                        const stabilized = landmarkStabilizerRef.current.apply(raw, nowMs);
 
-                        setLandmarks(compensated, handed, raw);
+                        setLandmarks(stabilized, handed, raw, nowMs);
                         prevRawLandmarksRef.current = cloneLandmarks(raw);
 
                         // Orientation detection (palm vs back) & log when it changes (rate-limited)
-                        const orientation = detectHandOrientation(smoothed as unknown as Landmark[], lastOrientationRef.current, handed);
+                        // Use raw landmarks so hand flipping updates without stabilization delay.
+                        const orientation = detectHandOrientation(raw, lastOrientationRef.current, handed);
                         if (orientation && orientation !== lastOrientationRef.current) {
                             const now = performance.now();
                             if (now - lastOrientationLogTs.current > 250) { // debounce window
@@ -304,18 +246,18 @@ export default function HandTracker() {
                         }
 
                         // Compute and smooth continuous palm score for subtle effects like ring tilt
-                        const scoreRaw = computePalmScore(smoothed as unknown as Landmark[], handed);
+                        const scoreRaw = computePalmScore(raw, handed);
                         const score = palmScoreEmaRef.current.update(scoreRaw);
                         setPalmScore(score);
                     } else {
-                        setLandmarks(null, null, null);
+                        setLandmarks(null, null, null, nowMs);
                         setPalmScore(null);
                         if (lastOrientationRef.current !== null) {
                             lastOrientationRef.current = null;
                             setOrientation(null);
                         }
-                        // Reset smoothers when no hand
-                        landmarkSmootherRef.current.reset();
+                        // Reset stabilizers when no hand
+                        landmarkStabilizerRef.current.reset();
                         palmScoreEmaRef.current.reset();
                         prevRawLandmarksRef.current = null;
                         lastFrameTimeRef.current = null;
@@ -484,72 +426,8 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
     return result;
 }
 
-type LagCompensationArgs = {
-    smoothed: Landmark[];
-    raw: Landmark[];
-    prevRaw: Landmark[] | null;
-    deltaTime: number;
-};
-
-function applyLagCompensation({ smoothed, raw, prevRaw, deltaTime }: LagCompensationArgs): Landmark[] {
-    if (!smoothed || !raw || smoothed.length !== raw.length) {
-        return cloneLandmarks(smoothed);
-    }
-
-    if (!prevRaw || prevRaw.length !== raw.length || !Number.isFinite(deltaTime) || deltaTime <= 0) {
-        return cloneLandmarks(smoothed);
-    }
-
-    const out: Landmark[] = new Array(smoothed.length);
-    const baseLeadMs = 22; // desired phase lead to counter smoothing latency (~22ms)
-    const frameMs = Math.max(deltaTime * 1000, 4);
-    const leadGain = clampNumber(baseLeadMs / frameMs, 0.45, 1.25);
-    const maxOffset = 0.045;
-    const maxOffsetZ = 0.08;
-    const motionThreshold = 0.0012;
-
-    for (let i = 0; i < smoothed.length; i++) {
-        const smooth = smoothed[i];
-        const curr = raw[i];
-        const prev = prevRaw[i];
-        if (!smooth || !curr || !prev) {
-            out[i] = smooth ? { ...smooth } : curr ? { ...curr } : { x: 0, y: 0, z: 0 };
-            continue;
-        }
-
-        const dx = curr.x - prev.x;
-        const dy = curr.y - prev.y;
-        const dz = curr.z - prev.z;
-
-        const planarMotion = Math.hypot(dx, dy);
-        if (planarMotion < motionThreshold) {
-            out[i] = { ...smooth };
-            continue;
-        }
-
-        const dynamicBoost = clampNumber(planarMotion / 0.02, 0, 1);
-        const gain = leadGain * (0.45 + 0.55 * dynamicBoost);
-
-        const offsetX = clampNumber(dx * gain, -maxOffset, maxOffset);
-        const offsetY = clampNumber(dy * gain, -maxOffset, maxOffset);
-        const offsetZ = clampNumber(dz * gain * 0.85, -maxOffsetZ, maxOffsetZ);
-
-        out[i] = {
-            x: clampNumber(smooth.x + offsetX, 0, 1),
-            y: clampNumber(smooth.y + offsetY, 0, 1),
-            z: clampNumber(smooth.z + offsetZ, -1, 1),
-        };
-    }
-
-    return out;
-}
-
 function cloneLandmarks(list: Landmark[]): Landmark[] {
     return list.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-}
-
-function clampNumber(value: number, min: number, max: number) {
-    return Math.max(min, Math.min(max, value));
 }
 
 // Continuous palm score in range roughly [-1, 1]:
