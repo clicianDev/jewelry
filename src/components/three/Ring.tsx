@@ -6,6 +6,11 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useHandStore } from "@/store/hands";
 
 import ringUrl from "@/assets/diamond_ring.glb";
+import classicRingUrl from "@/assets/ring.glb";
+
+type RingProps = {
+  modelUrl?: string;
+};
 
 type Vec3Like = { x: number; y: number; z: number };
 
@@ -24,9 +29,10 @@ function distance3(a: Vec3Like, b: Vec3Like) {
   );
 }
 
-export default function Ring() {
+export default function Ring({ modelUrl }: RingProps) {
   const group = useRef<THREE.Group>(null!);
-  const { scene } = useGLTF(ringUrl);
+  const activeModelUrl = modelUrl ?? ringUrl;
+  const { scene } = useGLTF(activeModelUrl);
   const userRotationGroup = useRef<THREE.Group>(null!);
   // Prefer raw landmarks for zero-latency placement; fall back to blended when raw data is unavailable.
   const landmarksRaw = useHandStore((state) => state.landmarksRaw);
@@ -613,3 +619,4 @@ export default function Ring() {
 }
 
 useGLTF.preload(ringUrl);
+useGLTF.preload(classicRingUrl);

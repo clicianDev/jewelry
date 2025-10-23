@@ -3,7 +3,7 @@ import { useRef, useState, useEffect } from "react";
 import * as THREE from "three";
 import Ring from "@/components/three/Ring";
 
-export default function RingPresence({show}: {show: boolean}) {
+export default function RingPresence({ show, assetUrl }: { show: boolean; assetUrl?: string }) {
     const group = useRef<THREE.Group>(null);
     const [mounted, setMounted] = useState(false);
     const MIN_SCALE = 0.0001;
@@ -51,7 +51,7 @@ export default function RingPresence({show}: {show: boolean}) {
     if (!mounted) return null;
     return (
         <group ref={group} scale={show ? 0.8 : MIN_SCALE}>
-            <Ring />
+            <Ring modelUrl={assetUrl} />
         </group>
     );
 }
