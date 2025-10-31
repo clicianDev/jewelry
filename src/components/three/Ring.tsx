@@ -21,6 +21,12 @@ const FINGER_CHAINS = [
   [17, 18, 19, 20],
 ] as const;
 
+const DEFAULT_MODEL_INNER_DIAMETER_RATIO = 0.78; // baseline calibration for solitaire ring model
+const MODEL_INNER_DIAMETER_RATIO_MAP: Record<string, number> = {
+  [ringUrl]: 0.78,
+  [classicRingUrl]: 0.92,
+};
+
 function distance3(a: Vec3Like, b: Vec3Like) {
   return Math.sqrt(
     (a.x - b.x) * (a.x - b.x) +
@@ -32,6 +38,8 @@ function distance3(a: Vec3Like, b: Vec3Like) {
 export default function Ring({ modelUrl }: RingProps) {
   const group = useRef<THREE.Group>(null!);
   const activeModelUrl = modelUrl ?? ringUrl;
+  const modelInnerDiameterRatio =
+    MODEL_INNER_DIAMETER_RATIO_MAP[activeModelUrl] ?? DEFAULT_MODEL_INNER_DIAMETER_RATIO;
   const { scene } = useGLTF(activeModelUrl);
   const userRotationGroup = useRef<THREE.Group>(null!);
   // Prefer raw landmarks for zero-latency placement; fall back to blended when raw data is unavailable.
@@ -101,7 +109,6 @@ export default function Ring({ modelUrl }: RingProps) {
 
   // Model calibration: estimate ratio (inner_diameter / measured_box_diameter)
   // If your model's bounding box covers outer metal thickness, inner hole is smaller.
-  const MODEL_INNER_DIAMETER_RATIO = 0.78; // tweak if ring looks too big/small
 
   // Anatomical heuristic: proximal phalanx width ≈ 0.34–0.40 of proximal segment length (13->14)
   const FINGER_DIAMETER_TO_SEGMENT_RATIO = 0.40; // slightly larger to better approximate real finger thickness
@@ -466,8 +473,7 @@ export default function Ring({ modelUrl }: RingProps) {
       const desiredWorldDiameter = diameterNorm * viewWidthAtZ;
 
       if (baseDiameter.current) {
-        const modelInnerDiameter =
-          baseDiameter.current * MODEL_INNER_DIAMETER_RATIO;
+        const modelInnerDiameter = baseDiameter.current * modelInnerDiameterRatio;
         const fitScaleRaw =
           (desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter;
         const fitScale = THREE.MathUtils.clamp(

@@ -51,7 +51,7 @@ export default function RingPresence({ show, assetUrl }: { show: boolean; assetU
     if (!mounted) return null;
     return (
         <group ref={group} scale={show ? 0.8 : MIN_SCALE}>
-            <Ring modelUrl={assetUrl} />
+            <Ring key={assetUrl ?? "default"} modelUrl={assetUrl} />
         </group>
     );
 }
