@@ -91,6 +91,12 @@ export default function Ring({ modelUrl }: RingProps) {
   const microAnchorInitialized = useRef(false);
   const smoothedHandClosure = useRef(0);
 
+  // Smooth orientation transitions to prevent jitter when rotating hand
+  const smoothedOrientation = useRef<'palm' | 'back' | null>(null);
+  const orientationTransition = useRef(0); // 0 = palm, 1 = back
+  const prevRotation = useRef({ x: 0, y: 0, z: 0 }); // Track previous rotation for smoothing
+  const prevClipNormal = useRef(new THREE.Vector3(0, 0, -1)); // Track clipping plane normal for smoothing
+
   // Tuning
   // ---------------- Scaling Tuning ----------------
   // Optimized for Perfect Corp-level instant response with minimal jitter
@@ -558,22 +564,89 @@ export default function Ring({ modelUrl }: RingProps) {
         const sign = handedness?.toLowerCase() === "left" ? -1 : 1;
         const targetTilt = score * TILT_MAX_RAD * sign;
   const tiltAlpha = computeAlpha(TILT_RESPONSE, 0.06, smoothingAttenuation); // Much lower base strength (was 0.2)
-        if (orientation === "back") {
-          tiltX.current = THREE.MathUtils.lerp(tiltX.current, targetTilt, tiltAlpha);
-          const rx =
-            THREE.MathUtils.degToRad(
-              handedness?.toLowerCase() === "left" ? -65.0 : -128.0
-            ) + tiltX.current * 10 + offsetXRad;
-          const ry = offsetYRad;
-          const rz = offsetZRad - closureZ;
-          userRotationGroup.current.rotation.set(rx, ry, rz);
-        } else {
-          userRotationGroup.current.rotation.set(
-            1 + offsetXRad,
-            offsetYRad,
-            offsetZRad
-          );
+        
+        // Smooth orientation transition to prevent jitter when rotating hand
+        const targetTransition = orientation === "back" ? 1 : 0;
+        const transitionAlpha = 1 - Math.exp(-12 * delta); // Smooth but responsive transition
+        const prevTransition = orientationTransition.current;
+        orientationTransition.current = THREE.MathUtils.lerp(
+          orientationTransition.current,
+          targetTransition,
+          transitionAlpha
+        );
+        
+        // Log transition progress when changing
+        if (Math.abs(targetTransition - prevTransition) > 0.01) {
+          console.log(`[Ring] Orientation transitioning to ${orientation}, progress: ${(orientationTransition.current * 100).toFixed(1)}%`);
         }
+        
+        // Update smoothed orientation once transition is mostly complete
+        const prevSmoothedOrientation = smoothedOrientation.current;
+        if (orientationTransition.current > 0.9 && orientation === "back") {
+          smoothedOrientation.current = "back";
+        } else if (orientationTransition.current < 0.1 && orientation === "palm") {
+          smoothedOrientation.current = "palm";
+        }
+        
+        // Log when smoothed orientation actually changes
+        if (prevSmoothedOrientation !== smoothedOrientation.current && smoothedOrientation.current !== null) {
+          console.log(`[Ring] ✓ Smoothed orientation changed to: ${smoothedOrientation.current}`);
+        }
+        
+        // Calculate target rotations for both orientations
+        const backRotation = {
+          x: THREE.MathUtils.degToRad(
+            handedness?.toLowerCase() === "left" ? -65.0 : -128.0
+          ) + tiltX.current * 10 + offsetXRad,
+          y: offsetYRad,
+          z: offsetZRad - closureZ,
+        };
+        
+        const palmRotation = {
+          x: 1 + offsetXRad,
+          y: offsetYRad,
+          z: offsetZRad,
+        };
+        
+        // Blend between orientations based on transition state
+        const blendedRotation = {
+          x: THREE.MathUtils.lerp(palmRotation.x, backRotation.x, orientationTransition.current),
+          y: THREE.MathUtils.lerp(palmRotation.y, backRotation.y, orientationTransition.current),
+          z: THREE.MathUtils.lerp(palmRotation.z, backRotation.z, orientationTransition.current),
+        };
+        
+        // Apply additional smoothing to rotation changes
+        const rotationSmoothAlpha = 1 - Math.exp(-15 * delta);
+        prevRotation.current.x = THREE.MathUtils.lerp(prevRotation.current.x, blendedRotation.x, rotationSmoothAlpha);
+        prevRotation.current.y = THREE.MathUtils.lerp(prevRotation.current.y, blendedRotation.y, rotationSmoothAlpha);
+        prevRotation.current.z = THREE.MathUtils.lerp(prevRotation.current.z, blendedRotation.z, rotationSmoothAlpha);
+        
+        // Limit palm orientation rotation to max -150° for LEFT hand only
+        const MAX_PALM_ROTATION = THREE.MathUtils.degToRad(-150);
+        if (orientation === "palm" && handedness?.toLowerCase() === "left" && prevRotation.current.x < MAX_PALM_ROTATION) {
+          prevRotation.current.x = MAX_PALM_ROTATION;
+          console.log(`[Ring] Left hand palm rotation limited to -150°`);
+        }
+        
+        // Only update tiltX when in back orientation
+        if (orientationTransition.current > 0.5) {
+          tiltX.current = THREE.MathUtils.lerp(tiltX.current, targetTilt, tiltAlpha);
+        }
+        
+        userRotationGroup.current.rotation.set(
+          prevRotation.current.x,
+          prevRotation.current.y,
+          prevRotation.current.z
+        );
+        
+        // Log ring rotation XYZ every frame with side information
+        const rotDeg = {
+          x: THREE.MathUtils.radToDeg(prevRotation.current.x),
+          y: THREE.MathUtils.radToDeg(prevRotation.current.y),
+          z: THREE.MathUtils.radToDeg(prevRotation.current.z),
+        };
+        const sideShowing = orientation === "palm" ? "PALM (showing stone/head)" : orientation === "back" ? "BACK (showing shank/band)" : "UNKNOWN";
+        console.log(`[Ring Rotation] x: ${rotDeg.x.toFixed(2)}°, y: ${rotDeg.y.toFixed(2)}°, z: ${rotDeg.z.toFixed(2)}° | Side: ${sideShowing} | Hand: ${handedness || 'unknown'} | Transition: ${(orientationTransition.current * 100).toFixed(1)}%`);
       }
 
       // --- Dynamic half-ring visibility controlled by hand orientation ---
@@ -587,10 +660,24 @@ export default function Ring({ modelUrl }: RingProps) {
           .copy(camera.position)
           .sub(group.current.position)
           .normalize();
-        // If palm is facing camera we invert to hide head instead (so shank shows)
-        const finalNormal = orientation === 'palm' ? planeNormal.clone().negate() : planeNormal;
+        
+        // Calculate target normal based on orientation with smooth transition
+        const palmNormal = planeNormal.clone().negate();
+        const backNormal = planeNormal.clone();
+        
+        // Blend between orientations based on transition state
+        const targetNormal = new THREE.Vector3().lerpVectors(
+          palmNormal, 
+          backNormal, 
+          orientationTransition.current
+        ).normalize();
+        
+        // Smooth the normal change to prevent visual popping
+        const normalSmoothAlpha = 1 - Math.exp(-10 * delta);
+        prevClipNormal.current.lerp(targetNormal, normalSmoothAlpha).normalize();
+        
         clipPlane.current.setFromNormalAndCoplanarPoint(
-          finalNormal,
+          prevClipNormal.current,
           group.current.position
         );  
         // Apply plane to all materials; side determines which half is kept
@@ -610,6 +697,9 @@ export default function Ring({ modelUrl }: RingProps) {
       filteredAnchorInitialized.current = false;
       microAnchorInitialized.current = false;
       smoothedHandClosure.current = 0;
+      orientationTransition.current = 0;
+      smoothedOrientation.current = null;
+      prevRotation.current = { x: 0, y: 0, z: 0 };
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
       group.current.rotation.y += delta * 0.6;
