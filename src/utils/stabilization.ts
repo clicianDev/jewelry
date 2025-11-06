@@ -25,6 +25,11 @@ function clamp(value: number, min: number, max: number): number {
  * OneEuroFilter - Low-latency smoothing filter that adapts to motion speed
  * Fast movements pass through with minimal lag; slow movements get stronger filtering
  * Reference: http://www.lifl.fr/~casiez/1euro/
+ * 
+ * Enhanced for Perfect Corp-level responsiveness:
+ * - Higher minCutoff for faster response to changes
+ * - Higher beta for better velocity tracking
+ * - Optimized for near-zero latency on fast movements
  */
 class OneEuroFilter {
   private x: number | null = null;
@@ -35,9 +40,9 @@ class OneEuroFilter {
   private dCutoff: number;
   
   constructor(
-    minCutoff = 1.0,    // Minimum cutoff frequency (Hz) - lower = more smoothing
-    beta = 0.007,        // Speed coefficient - how much to respond to velocity
-    dCutoff = 1.0        // Cutoff for derivative
+    minCutoff = 3.0,    // Higher = more responsive (was 1.0, now 3.0)
+    beta = 0.02,        // Higher = better velocity response (was 0.007, now 0.02)
+    dCutoff = 2.0       // Higher derivative cutoff for better motion tracking
   ) {
     this.minCutoff = minCutoff;
     this.beta = beta;
@@ -93,10 +98,13 @@ class OneEuroFilter {
 
 /**
  * StabilizationFilter - Combines multiple techniques for low-latency, jitter-free tracking
+ * Enhanced with velocity prediction for Perfect Corp-level instant response
  */
 export class StabilizationFilter {
   private prev: Vec3 | null = null;
   private velocity: Vec3 = { x: 0, y: 0, z: 0 };
+  private acceleration: Vec3 = { x: 0, y: 0, z: 0 }; // Track acceleration for better prediction
+  private velocityHistory: Vec3[] = []; // Multi-frame velocity history
   private oneEuroX: OneEuroFilter;
   private oneEuroY: OneEuroFilter;
   private oneEuroZ: OneEuroFilter;
@@ -106,15 +114,16 @@ export class StabilizationFilter {
   private velocitySmoothing: number;
   private jitterThreshold: number;
   private predictionStrength: number;
+  private readonly VELOCITY_HISTORY_SIZE = 5; // Track last 5 frames for better prediction
 
   constructor(
-    deadZone = 0.0008,           // Ignore movements smaller than this (normalized coords)
-    velocitySmoothing = 0.3,     // How much to smooth velocity (0=none, 1=full)
-    jitterThreshold = 0.002,     // Threshold to detect jitter vs real movement
-    predictionStrength = 0.15,   // How much to predict ahead (0=none, 1=full frame)
-    oneEuroMinCutoff = 1.5,             // One Euro Filter params
-    oneEuroBeta = 0.007,
-    oneEuroDCutoff = 1.0
+    deadZone = 0.0003,           // Smaller deadzone for faster response (was 0.0008)
+    velocitySmoothing = 0.15,    // Less smoothing for instant tracking (was 0.3)
+    jitterThreshold = 0.0015,    // Lower threshold for jitter detection (was 0.002)
+    predictionStrength = 0.35,   // Stronger prediction for motion compensation (was 0.15)
+    oneEuroMinCutoff = 3.0,      // Higher for instant response (was 1.5)
+    oneEuroBeta = 0.02,          // Higher for better velocity tracking (was 0.007)
+    oneEuroDCutoff = 2.0         // Higher derivative cutoff (was 1.0)
   ) {
     this.deadZone = deadZone;
     this.velocitySmoothing = velocitySmoothing;
@@ -128,6 +137,8 @@ export class StabilizationFilter {
   reset() {
     this.prev = null;
     this.velocity = { x: 0, y: 0, z: 0 };
+    this.acceleration = { x: 0, y: 0, z: 0 };
+    this.velocityHistory = [];
     this.oneEuroX.reset();
     this.oneEuroY.reset();
     this.oneEuroZ.reset();
@@ -156,30 +167,61 @@ export class StabilizationFilter {
       rawDelta.x * rawDelta.x + rawDelta.y * rawDelta.y + rawDelta.z * rawDelta.z
     );
 
-    // Dead zone - if movement is tiny, assume it's noise and return previous
+    // Dead zone - if movement is tiny, assume it's noise
+    // But use much smaller deadzone for faster response
     if (movementMagnitude < this.deadZone) {
       this.stableFrames++;
       this.lastTimestamp = timestamp;
-      return { ...this.prev };
+      // Still apply light filtering even in deadzone to reduce micro-jitter
+      return {
+        x: this.oneEuroX.update(point.x, timestamp),
+        y: this.oneEuroY.update(point.y, timestamp),
+        z: this.oneEuroZ.update(point.z, timestamp),
+      };
     }
 
     // Reset stable frame counter on significant movement
     this.stableFrames = 0;
 
-    // Update velocity with smoothing
+    // Calculate instantaneous velocity
     const currentVelocity = {
       x: rawDelta.x / dt,
       y: rawDelta.y / dt,
       z: rawDelta.z / dt,
     };
     
+    // Track velocity history for better prediction
+    this.velocityHistory.push({ ...currentVelocity });
+    if (this.velocityHistory.length > this.VELOCITY_HISTORY_SIZE) {
+      this.velocityHistory.shift();
+    }
+
+    // Calculate average velocity from history for more stable prediction
+    const avgVelocity = this.velocityHistory.reduce(
+      (acc, v) => ({ x: acc.x + v.x, y: acc.y + v.y, z: acc.z + v.z }),
+      { x: 0, y: 0, z: 0 }
+    );
+    const historySize = this.velocityHistory.length;
+    avgVelocity.x /= historySize;
+    avgVelocity.y /= historySize;
+    avgVelocity.z /= historySize;
+
+    // Update acceleration for trajectory prediction
+    const prevVelocity = this.velocity;
+    this.acceleration = {
+      x: (currentVelocity.x - prevVelocity.x) / dt,
+      y: (currentVelocity.y - prevVelocity.y) / dt,
+      z: (currentVelocity.z - prevVelocity.z) / dt,
+    };
+    
+    // Update velocity with minimal smoothing for instant response
     this.velocity = {
       x: lerp(this.velocity.x, currentVelocity.x, this.velocitySmoothing),
       y: lerp(this.velocity.y, currentVelocity.y, this.velocitySmoothing),
       z: lerp(this.velocity.z, currentVelocity.z, this.velocitySmoothing),
     };
 
-    // Detect jitter vs intentional movement
+    // Detect velocity magnitude
     const velocityMagnitude = Math.sqrt(
       this.velocity.x * this.velocity.x +
       this.velocity.y * this.velocity.y +
@@ -188,8 +230,7 @@ export class StabilizationFilter {
 
     let result: Vec3;
 
-    // If movement is small but above dead zone, it might be jitter
-    // Use One Euro Filter for adaptive smoothing
+    // For small movements, use One Euro Filter to reduce jitter
     if (movementMagnitude < this.jitterThreshold) {
       result = {
         x: this.oneEuroX.update(point.x, timestamp),
@@ -197,23 +238,27 @@ export class StabilizationFilter {
         z: this.oneEuroZ.update(point.z, timestamp),
       };
     } else {
-      // Fast movement - use raw data with optional prediction
+      // Fast movement - use aggressive prediction for zero-latency tracking
+      // This is key to matching Perfect Corp's instant response
       if (this.predictionStrength > 0 && velocityMagnitude > 0.001) {
-        // Predict position based on velocity
+        // Use average velocity from history for more stable prediction
+        const predictionTime = dt * this.predictionStrength;
+        
+        // Enhanced prediction with acceleration compensation
         const prediction = {
-          x: point.x + this.velocity.x * dt * this.predictionStrength,
-          y: point.y + this.velocity.y * dt * this.predictionStrength,
-          z: point.z + this.velocity.z * dt * this.predictionStrength,
+          x: point.x + avgVelocity.x * predictionTime + 0.5 * this.acceleration.x * predictionTime * predictionTime,
+          y: point.y + avgVelocity.y * predictionTime + 0.5 * this.acceleration.y * predictionTime * predictionTime,
+          z: point.z + avgVelocity.z * predictionTime + 0.5 * this.acceleration.z * predictionTime * predictionTime,
         };
         
-        // Blend between raw and predicted
+        // Clamp to valid ranges
         result = {
           x: clamp(prediction.x, 0, 1),
           y: clamp(prediction.y, 0, 1),
           z: clamp(prediction.z, -1, 1),
         };
         
-        // Still apply light One Euro filtering even on fast movements
+        // Apply minimal One Euro filtering to predicted position
         result = {
           x: this.oneEuroX.update(result.x, timestamp),
           y: this.oneEuroY.update(result.y, timestamp),
@@ -294,31 +339,31 @@ export class LandmarkStabilizer {
   private initializeFilters() {
     const presets = {
       responsive: {
-        deadZone: 0.0005,
-        velocitySmoothing: 0.2,
-        jitterThreshold: 0.0015,
-        predictionStrength: 0.2,
-        oneEuroMinCutoff: 2.0,
-        oneEuroBeta: 0.01,
-        oneEuroDCutoff: 1.0,
+        deadZone: 0.0002,           // Ultra-low deadzone for instant response
+        velocitySmoothing: 0.1,     // Minimal smoothing
+        jitterThreshold: 0.001,     // Lower jitter threshold
+        predictionStrength: 0.4,    // Strong prediction
+        oneEuroMinCutoff: 4.0,      // Very high for instant tracking
+        oneEuroBeta: 0.03,          // High velocity response
+        oneEuroDCutoff: 2.0,
       },
       balanced: {
-        deadZone: 0.0008,
-        velocitySmoothing: 0.3,
-        jitterThreshold: 0.002,
-        predictionStrength: 0.15,
-        oneEuroMinCutoff: 1.5,
-        oneEuroBeta: 0.007,
-        oneEuroDCutoff: 1.0,
+        deadZone: 0.0003,
+        velocitySmoothing: 0.15,
+        jitterThreshold: 0.0015,
+        predictionStrength: 0.35,
+        oneEuroMinCutoff: 3.0,
+        oneEuroBeta: 0.02,
+        oneEuroDCutoff: 2.0,
       },
       stable: {
-        deadZone: 0.0012,
-        velocitySmoothing: 0.4,
-        jitterThreshold: 0.0025,
-        predictionStrength: 0.1,
-        oneEuroMinCutoff: 1.0,
-        oneEuroBeta: 0.005,
-        oneEuroDCutoff: 1.0,
+        deadZone: 0.0006,
+        velocitySmoothing: 0.25,
+        jitterThreshold: 0.002,
+        predictionStrength: 0.25,
+        oneEuroMinCutoff: 2.0,
+        oneEuroBeta: 0.015,
+        oneEuroDCutoff: 1.5,
       },
     };
 

@@ -56,37 +56,37 @@ export default function HandTracker() {
             },
             deadZone: {
                 label: "Dead Zone (jitter filter)",
-                value: 0,
+                value: 0.0002,  // Lower default for more responsiveness (was 0)
                 min: 0,
                 max: 0.003,
                 step: 0.0001,
             },
             jitterThreshold: {
                 label: "Jitter Threshold",
-                value: 0.005,
+                value: 0.0015,  // Lower default (was 0.005)
                 min: 0.0005,
                 max: 0.005,
                 step: 0.0001,
             },
             predictionStrength: {
                 label: "Prediction Strength",
-                value: 0.5,
+                value: 0.4,  // Higher default for better motion compensation (was 0.5)
                 min: 0,
                 max: 0.5,
                 step: 0.05,
             },
             oneEuroMinCutoff: {
                 label: "One Euro Min Cutoff",
-                value: 5,
+                value: 4.0,  // Higher default for instant response (was 5)
                 min: 0.5,
                 max: 5,
                 step: 0.1,
             },
             oneEuroBeta: {
                 label: "One Euro Beta",
-                value: 0.02,
+                value: 0.03,  // Higher default for better velocity tracking (was 0.02)
                 min: 0.001,
-                max: 0.02,
+                max: 0.05,
                 step: 0.001,
             },
         }),
