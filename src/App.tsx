@@ -44,36 +44,38 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <div className="scene-panel">
-        <HandTracker />
-        <div className="scene-panel__canvas">
-          <Canvas
-            dpr={[1, 2]}
-            shadows={{ type: THREE.PCFSoftShadowMap }}
-            gl={{ antialias: true, preserveDrawingBuffer: true }}
-            camera={{ position: [129, 82.1, 129], fov: 45 }}
-          >
-            <Suspense fallback={null}>
-              {/* Use Video as Environment (uncomment to enable) */}
-              {/* <VideoEnvironment /> */}
-              
-              {/* Environment for realistic reflections */}
-              <Environment preset="city" resolution={1080} />
-              <Postprocessing />
-              {/* Wrap ring for smooth transitions */}
-              <RingPresence show={showRing} assetUrl={activeRing.assetUrl} />
-              {/* Preload all assets referenced in the scene */}
-              <Preload all />
-            </Suspense>
-            {/* Camera controls tuned for product viewing */}
-            {/* <OrbitControls maxDistance={200} minDistance={50} /> */}
-            {/* R3F default stats panel(FPS) */}
-            <Stats />
-          </Canvas>
+      <section className="scene-panel" aria-label="Virtual ring preview">
+        <div className="scene-panel__frame">
+          <div className="scene-panel__canvas">
+            <HandTracker />
+            <Canvas
+              dpr={[1, 2]}
+              shadows={{ type: THREE.PCFSoftShadowMap }}
+              gl={{ antialias: true, preserveDrawingBuffer: true }}
+              camera={{ position: [129, 82.1, 129], fov: 45 }}
+            >
+              <Suspense fallback={null}>
+                {/* Use Video as Environment (uncomment to enable) */}
+                {/* <VideoEnvironment /> */}
+
+                {/* Environment for realistic reflections */}
+                <Environment preset="city" resolution={1080} />
+                <Postprocessing />
+                {/* Wrap ring for smooth transitions */}
+                <RingPresence show={showRing} assetUrl={activeRing.assetUrl} />
+                {/* Preload all assets referenced in the scene */}
+                <Preload all />
+              </Suspense>
+              {/* Camera controls tuned for product viewing */}
+              {/* <OrbitControls maxDistance={200} minDistance={50} /> */}
+              {/* R3F default stats panel(FPS) */}
+              <Stats />
+            </Canvas>
+          </div>
         </div>
         {/* Basic loading overlay with progress bar */}
         <Loader />
-      </div>
+      </section>
       <RingMenu
         options={ringOptions}
         selectedId={selectedRingId}

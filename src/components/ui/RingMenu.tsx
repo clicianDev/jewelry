@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useMemo } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 export type RingOption = {
   id: string;
@@ -16,37 +17,80 @@ type RingMenuProps = {
 };
 
 export default function RingMenu({ options, selectedId, onSelect }: RingMenuProps) {
+  const introCopy = useMemo(
+    () =>
+      "Preview rings in real time, swap styles instantly, and keep the camera feed active while you explore.",
+    []
+  );
+
   return (
-    <aside className="ring-menu" aria-label="Ring selection">
-      <header className="ring-menu__header">
-        <h2 className="ring-menu__title">Choose Your Ring</h2>
-        <p className="ring-menu__subtitle">Swap styles instantly to see how each band looks on your hand.</p>
+    <section className="ring-selector" aria-label="Ring selection">
+      <header className="ring-selector__intro">
+        <h2>Virtual Ring Studio</h2>
+        <p>{introCopy}</p>
       </header>
-      <div role="list" className="ring-menu__options">
+
+      <div className="ring-selector__grid">
         {options.map((option) => {
           const isActive = option.id === selectedId;
+          const accent = option.accentColor ?? "#6366f1";
+          const gradient = `linear-gradient(140deg, ${accent} 0%, rgba(17, 24, 39, 0.88) 100%)`;
+
+          const handleSelect = () => {
+            if (!isActive) {
+              onSelect(option.id);
+            }
+          };
+
           return (
-            <button
-              key={option.id}
-              type="button"
-              role="listitem"
-              className={`ring-menu__option${isActive ? " ring-menu__option--active" : ""}`}
-              onClick={() => onSelect(option.id)}
-            >
-              <span className="ring-menu__option-indicator" aria-hidden>
-                <span style={{ background: option.accentColor ?? "#facc15" }} />
-              </span>
-              <span className="ring-menu__option-content">
-                <span className="ring-menu__option-name">{option.name}</span>
-                {option.description && (
-                  <span className="ring-menu__option-description">{option.description}</span>
-                )}
+            <div key={option.id} className={`ring-card${isActive ? " ring-card--active" : ""}`}>
+              <button
+                type="button"
+                className="ring-card__select"
+                onClick={handleSelect}
+                aria-pressed={isActive}
+              >
+                <div className="ring-card__media" style={{ background: gradient }}>
+                  {option.name}
+                </div>
                 {option.extra}
-              </span>
-            </button>
+              </button>
+              <div className="ring-card__actions">
+                <button
+                  type="button"
+                  className="ring-card__action"
+                  onClick={(event: MouseEvent<HTMLButtonElement>) => event.stopPropagation()}
+                  disabled={!isActive}
+                  aria-label="Decrease ring size"
+                >
+                  –
+                </button>
+                <button
+                  type="button"
+                  className="ring-card__action ring-card__action--primary"
+                  onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                    event.stopPropagation();
+                    onSelect(option.id);
+                  }}
+                  aria-label="Add this ring"
+                >
+                  +
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
-    </aside>
+
+      <footer className="ring-selector__footer">
+        <button type="button" className="ring-selector__guide">
+          View size guide
+        </button>
+        <div className="ring-selector__cta">
+          <button type="button">Book Consultation</button>
+          <button type="button">Learn More</button>
+        </div>
+      </footer>
+    </section>
   );
 }
