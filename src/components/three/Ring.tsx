@@ -27,6 +27,30 @@ const MODEL_INNER_DIAMETER_RATIO_MAP: Record<string, number> = {
   [classicRingUrl]: 0.92,
 };
 
+const MICRO_JITTER_CONFIG = {
+  position: { threshold: 0.0025, strength: 0.45 },
+  scale: { threshold: 0.003, strength: 0.4 },
+  rotation: { threshold: 0.002, strength: 0.35 },
+} as const;
+
+const MIN_ADAPTIVE_ALPHA = 0.001;
+
+function applyMicroJitterDamping(
+  alpha: number,
+  motion: number,
+  threshold: number,
+  strength: number
+) {
+  if (!Number.isFinite(alpha)) return alpha;
+  if (motion <= 0 || motion >= threshold) {
+    return Math.min(alpha, 1);
+  }
+  const normalized = 1 - motion / threshold;
+  const damping = 1 - strength * normalized * normalized;
+  const damped = alpha * damping;
+  return THREE.MathUtils.clamp(damped, MIN_ADAPTIVE_ALPHA, 1);
+}
+
 function distance3(a: Vec3Like, b: Vec3Like) {
   return Math.sqrt(
     (a.x - b.x) * (a.x - b.x) +
@@ -83,6 +107,7 @@ export default function Ring({ modelUrl }: RingProps) {
   const prevAnchor = useRef(new THREE.Vector3());
   const anchorVelocity = useRef(new THREE.Vector3());
   const anchorInitialized = useRef(false);
+  const anchorMotionMagnitude = useRef(0);
   const prevRawAnchorNorm = useRef({ x: 0, y: 0 });
   const prevFilteredAnchorNorm = useRef({ x: 0, y: 0 });
   const rawAnchorInitialized = useRef(false);
@@ -313,6 +338,7 @@ export default function Ring({ modelUrl }: RingProps) {
           rawAnchorY - prevRawAnchorNorm.current.y
         );
       }
+      anchorMotionMagnitude.current = rawDelta;
       prevRawAnchorNorm.current.x = rawAnchorX;
       prevRawAnchorNorm.current.y = rawAnchorY;
 
@@ -447,7 +473,13 @@ export default function Ring({ modelUrl }: RingProps) {
         }
       }
 
-  const posAlpha = computeAlpha(POSITION_DAMP, 0.05, smoothingAttenuation); // Much lower base strength (was 0.26)
+      let posAlpha = computeAlpha(POSITION_DAMP, 0.05, smoothingAttenuation); // Much lower base strength (was 0.26)
+      posAlpha = applyMicroJitterDamping(
+        posAlpha,
+        anchorMotionMagnitude.current,
+        MICRO_JITTER_CONFIG.position.threshold,
+        MICRO_JITTER_CONFIG.position.strength
+      );
       if (smoothedPosition.current.lengthSq() === 0 || posAlpha >= 0.999) {
         smoothedPosition.current.copy(pos.current);
       } else {
@@ -460,7 +492,13 @@ export default function Ring({ modelUrl }: RingProps) {
       const dySeg = p13.y - p14.y;
       const segmentLenNorm = Math.sqrt(dxSeg * dxSeg + dySeg * dySeg);
       const rawDiameterNorm = segmentLenNorm * FINGER_DIAMETER_TO_SEGMENT_RATIO;
-  const widthAlpha = computeAlpha(WIDTH_RESPONSE, 0.05, smoothingAttenuation); // Much lower base strength (was 0.22)
+      let widthAlpha = computeAlpha(WIDTH_RESPONSE, 0.05, smoothingAttenuation); // Much lower base strength (was 0.22)
+      widthAlpha = applyMicroJitterDamping(
+        widthAlpha,
+        anchorMotionMagnitude.current,
+        MICRO_JITTER_CONFIG.scale.threshold,
+        MICRO_JITTER_CONFIG.scale.strength * 0.7
+      );
       smoothedFingerDiameterNorm.current =
         smoothedFingerDiameterNorm.current == null
           ? rawDiameterNorm
@@ -490,7 +528,13 @@ export default function Ring({ modelUrl }: RingProps) {
           SCALE_MIN,
           SCALE_MAX
         );
-  const scaleAlpha = computeAlpha(SCALE_RESPONSE, 0.04, smoothingAttenuation); // Much lower base strength (was 0.24)
+        let scaleAlpha = computeAlpha(SCALE_RESPONSE, 0.04, smoothingAttenuation); // Much lower base strength (was 0.24)
+        scaleAlpha = applyMicroJitterDamping(
+          scaleAlpha,
+          anchorMotionMagnitude.current,
+          MICRO_JITTER_CONFIG.scale.threshold,
+          MICRO_JITTER_CONFIG.scale.strength
+        );
         targetScale.current = THREE.MathUtils.lerp(
           targetScale.current,
           fitScale,
@@ -508,7 +552,13 @@ export default function Ring({ modelUrl }: RingProps) {
       const targetAngle = -segAngle + 0.5;
       const curr = viewAxisAngle.current;
       const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI;
-  const angleAlpha = computeAlpha(ORIENTATION_RESPONSE, 0.03, smoothingAttenuation); // Much lower base strength (was 0.22)
+      let angleAlpha = computeAlpha(ORIENTATION_RESPONSE, 0.03, smoothingAttenuation); // Much lower base strength (was 0.22)
+      angleAlpha = applyMicroJitterDamping(
+        angleAlpha,
+        anchorMotionMagnitude.current,
+        MICRO_JITTER_CONFIG.rotation.threshold,
+        MICRO_JITTER_CONFIG.rotation.strength
+      );
       viewAxisAngle.current = curr + diff * angleAlpha;
       group.current.rotation.z = viewAxisAngle.current;
 
@@ -563,7 +613,13 @@ export default function Ring({ modelUrl }: RingProps) {
           : 0;
         const sign = handedness?.toLowerCase() === "left" ? -1 : 1;
         const targetTilt = score * TILT_MAX_RAD * sign;
-  const tiltAlpha = computeAlpha(TILT_RESPONSE, 0.06, smoothingAttenuation); // Much lower base strength (was 0.2)
+        let tiltAlpha = computeAlpha(TILT_RESPONSE, 0.06, smoothingAttenuation); // Much lower base strength (was 0.2)
+        tiltAlpha = applyMicroJitterDamping(
+          tiltAlpha,
+          anchorMotionMagnitude.current,
+          MICRO_JITTER_CONFIG.rotation.threshold,
+          MICRO_JITTER_CONFIG.rotation.strength * 0.8
+        );
         
         // Smooth orientation transition to prevent jitter when rotating hand
         const targetTransition = orientation === "back" ? 1 : 0;
