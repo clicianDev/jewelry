@@ -10,6 +10,8 @@ import RingPresence from "@/components/three/RingPresense";
 import RingMenu, { type RingOption } from "@/components/ui/RingMenu";
 import classicRingUrl from "@/assets/ring.glb";
 import diamondRingUrl from "@/assets/diamond_ring.glb";
+import diamondRingImg from "@/assets/images/diamond_ring.png";
+import classicRingImg from "@/assets/images/ring.png";
 import "./App.css";
 
 export default function App() {
@@ -24,6 +26,7 @@ export default function App() {
         description: "Brilliant-cut centre stone with tapered band",
         assetUrl: diamondRingUrl,
         accentColor: "#60a5fa",
+        thumbnail: diamondRingImg,
       },
       {
         id: "classic",
@@ -31,6 +34,7 @@ export default function App() {
         description: "Minimal rounded profile for everyday wear",
         assetUrl: classicRingUrl,
         accentColor: "#fbbf24",
+        thumbnail: classicRingImg,
       },
     ],
     []

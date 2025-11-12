@@ -7,6 +7,7 @@ export type RingOption = {
   description?: string;
   assetUrl: string;
   accentColor?: string;
+  thumbnail?: string;
   extra?: ReactNode;
 };
 
@@ -33,8 +34,6 @@ export default function RingMenu({ options, selectedId, onSelect }: RingMenuProp
       <div className="ring-selector__grid">
         {options.map((option) => {
           const isActive = option.id === selectedId;
-          const accent = option.accentColor ?? "#6366f1";
-          const gradient = `linear-gradient(140deg, ${accent} 0%, rgba(17, 24, 39, 0.88) 100%)`;
 
           const handleSelect = () => {
             if (!isActive) {
@@ -50,8 +49,12 @@ export default function RingMenu({ options, selectedId, onSelect }: RingMenuProp
                 onClick={handleSelect}
                 aria-pressed={isActive}
               >
-                <div className="ring-card__media" style={{ background: gradient }}>
-                  {option.name}
+                <div className="ring-card__media">
+                  {option.thumbnail ? (
+                    <img src={option.thumbnail} alt={option.name} />
+                  ) : (
+                    <span>{option.name}</span>
+                  )}
                 </div>
                 {option.extra}
               </button>
