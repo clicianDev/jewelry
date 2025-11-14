@@ -135,6 +135,11 @@ export default function Ring({ modelUrl }: RingProps) {
   const DEPTH_RESPONSE = 180; // much faster depth tracking (was 95)
   const SCALE_MIN = 0.05;
   const SCALE_MAX = 3.5;
+  // Depth-driven scale range ensures ring grows as hand approaches camera.
+  const DEPTH_SCALE_NEAR_DISTANCE = Math.max(5, BASE_DISTANCE - DEPTH_RANGE * 0.45);
+  const DEPTH_SCALE_FAR_DISTANCE = BASE_DISTANCE + DEPTH_RANGE * 0.55;
+  const DEPTH_SCALE_NEAR = 1.35;
+  const DEPTH_SCALE_FAR = 0.75;
   const smoothedDistance = useRef(BASE_DISTANCE);
   const CLOSURE_RESPONSE = 120; // faster hand closure response (was 70)
 
@@ -518,11 +523,26 @@ export default function Ring({ modelUrl }: RingProps) {
       const viewWidthAtZ =
         2 * smoothedDistance.current * Math.tan(fovRad / 2) * aspect;
       const desiredWorldDiameter = diameterNorm * viewWidthAtZ;
+      const depthDistanceRange = DEPTH_SCALE_FAR_DISTANCE - DEPTH_SCALE_NEAR_DISTANCE;
+      const normalizedDistance =
+        depthDistanceRange > 1e-4
+          ? THREE.MathUtils.clamp(
+              (smoothedDistance.current - DEPTH_SCALE_NEAR_DISTANCE) /
+                depthDistanceRange,
+              0,
+              1
+            )
+          : 0;
+      const depthScaleFactor = THREE.MathUtils.lerp(
+        DEPTH_SCALE_NEAR,
+        DEPTH_SCALE_FAR,
+        normalizedDistance
+      );
 
       if (baseDiameter.current) {
         const modelInnerDiameter = baseDiameter.current * modelInnerDiameterRatio;
         const fitScaleRaw =
-          (desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter;
+          ((desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter) * depthScaleFactor;
         const fitScale = THREE.MathUtils.clamp(
           fitScaleRaw * fitAdjust,
           SCALE_MIN,
