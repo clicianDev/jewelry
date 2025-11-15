@@ -642,7 +642,28 @@ export default function Ring({ modelUrl }: RingProps) {
         );
         
         // Smooth orientation transition to prevent jitter when rotating hand
-        const targetTransition = orientation === "back" ? 1 : 0;
+        const normalizedPalmScore = palmScore != null
+          ? THREE.MathUtils.clamp(palmScore, -1, 1)
+          : orientation === "back"
+          ? -1
+          : orientation === "palm"
+          ? 1
+          : 0;
+        const scoreTransition = THREE.MathUtils.clamp(0.5 - 0.5 * normalizedPalmScore, 0, 1);
+        let targetTransition = orientation === "back" ? 1 : orientation === "palm" ? 0 : scoreTransition;
+        const scoreWeight = palmScore != null
+          ? THREE.MathUtils.clamp((Math.abs(normalizedPalmScore) - SCORE_EPS) / Math.max(1 - SCORE_EPS, 1e-5), 0, 1)
+          : 0;
+        if (scoreWeight > 0) {
+          const blendedScoreTarget = THREE.MathUtils.lerp(targetTransition, scoreTransition, scoreWeight);
+          if (orientation === "back") {
+            targetTransition = Math.min(targetTransition, blendedScoreTarget);
+          } else if (orientation === "palm") {
+            targetTransition = Math.max(targetTransition, blendedScoreTarget);
+          } else {
+            targetTransition = blendedScoreTarget;
+          }
+        }
         const transitionAlpha = 1 - Math.exp(-12 * delta); // Smooth but responsive transition
         const prevTransition = orientationTransition.current;
         orientationTransition.current = THREE.MathUtils.lerp(
@@ -690,10 +711,10 @@ export default function Ring({ modelUrl }: RingProps) {
           y: THREE.MathUtils.lerp(palmRotation.y, backRotation.y, orientationTransition.current),
           z: THREE.MathUtils.lerp(palmRotation.z, backRotation.z, orientationTransition.current),
         };
-        
-        // Apply additional smoothing to rotation changes
+
+        // Apply additional smoothing to rotation changes (X axis follows instantly to avoid lag)
         const rotationSmoothAlpha = 1 - Math.exp(-15 * delta);
-        prevRotation.current.x = THREE.MathUtils.lerp(prevRotation.current.x, blendedRotation.x, rotationSmoothAlpha);
+        prevRotation.current.x = blendedRotation.x;
         prevRotation.current.y = THREE.MathUtils.lerp(prevRotation.current.y, blendedRotation.y, rotationSmoothAlpha);
         prevRotation.current.z = THREE.MathUtils.lerp(prevRotation.current.z, blendedRotation.z, rotationSmoothAlpha);
         
