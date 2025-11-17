@@ -164,7 +164,7 @@ export default function Ring({ modelUrl }: RingProps) {
   // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
   // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
   const { fitAdjust, anchorToward14, alongFinger, positionSmoothing, motionLookaheadMs, jitterBlend, jitterVelocityCutoff, jitterDeadzone } = useControls('Ring Fit', {
-    fitAdjust: { value: 1.30, min: 0.5, max: 1.6, step: 0.01 },
+    fitAdjust: { value: 1.8, min: 0.5, max: 2.0, step: 0.01 },
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
     positionSmoothing: { label: "Smoothing Amount", value: 0, min: 0, max: 1, step: 0.05 },
@@ -174,7 +174,7 @@ export default function Ring({ modelUrl }: RingProps) {
     jitterDeadzone: { label: "Jitter Deadzone", value: 0.0008, min: 0, max: 0.015, step: 0.0001 }, // Smaller for more responsiveness
   });
   const { rotationOffsetX, rotationOffsetY, rotationOffsetZ, closureOffsetZ, positionOffsetZ, closureOffsetPositionZ } = useControls('Ring Orientation', {
-    rotationOffsetX: { label: "Offset X (°)", value: 0, min: -180, max: 180, step: 0.5 },
+    rotationOffsetX: { label: "Offset X (°)", value: 25, min: -180, max: 180, step: 0.5 },
     rotationOffsetY: { label: "Offset Y (°)", value: 0, min: -180, max: 180, step: 0.5 },
     rotationOffsetZ: { label: "Offset Z (°)", value: 0, min: -180, max: 180, step: 0.5 },
     closureOffsetZ: { label: "Close Adjust Z (°)", value: 80, min: 0, max: 90, step: 0.5 },
@@ -585,7 +585,7 @@ export default function Ring({ modelUrl }: RingProps) {
 
       if (userRotationGroup.current) {
         const rotationOffsetXDeg =
-          handedness?.toLowerCase() === "right" ? -33.0 : rotationOffsetX;
+          handedness?.toLowerCase() === "right" ? -50.0 : rotationOffsetX;
         const offsetXRad = THREE.MathUtils.degToRad(rotationOffsetXDeg);
         const offsetYRad = THREE.MathUtils.degToRad(rotationOffsetY);
         const offsetZRad = THREE.MathUtils.degToRad(rotationOffsetZ);
@@ -685,7 +685,7 @@ export default function Ring({ modelUrl }: RingProps) {
         const backRotation = {
           x: THREE.MathUtils.degToRad(
             handedness?.toLowerCase() === "left" ? -65.0 : -128.0
-          ) + tiltX.current * 10 + offsetXRad,
+          ) + tiltX.current * 8 + offsetXRad,
           y: offsetYRad,
           z: offsetZRad - closureZ,
         };
@@ -710,10 +710,11 @@ export default function Ring({ modelUrl }: RingProps) {
         prevRotation.current.z = THREE.MathUtils.lerp(prevRotation.current.z, blendedRotation.z, rotationSmoothAlpha);
         
         // Limit palm orientation rotation to max -150° for LEFT hand only
-        const MAX_PALM_ROTATION = THREE.MathUtils.degToRad(-150);
-        if (orientation === "palm" && handedness?.toLowerCase() === "left" && prevRotation.current.x < MAX_PALM_ROTATION) {
-          prevRotation.current.x = MAX_PALM_ROTATION;
-        }
+        // const MAX_PALM_ROTATION_LEFT = THREE.MathUtils.degToRad(-150);
+        // if (orientation === "palm" && prevRotation.current.x < MAX_PALM_ROTATION_LEFT) {
+        //   prevRotation.current.x = MAX_PALM_ROTATION_LEFT;
+        // }
+        
         
         // Only update tiltX when in back orientation
         if (orientationTransition.current > 0.5) {
