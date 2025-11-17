@@ -239,13 +239,9 @@ export default function HandTracker() {
                             const now = performance.now();
                             // Longer debounce window to prevent jitter during rotation (was 250ms)
                             if (now - lastOrientationLogTs.current > 500) {
-                                const timeSinceLastChange = (now - lastOrientationLogTs.current) / 1000;
-                                console.log(`[HandTracker] 🔄 Hand orientation changed: ${lastOrientationRef.current || 'none'} → ${orientation} (after ${timeSinceLastChange.toFixed(2)}s)`);
                                 lastOrientationRef.current = orientation;
                                 lastOrientationLogTs.current = now;
                                 setOrientation(orientation as 'palm' | 'back');
-                            } else {
-                                console.log(`[HandTracker] ⏳ Orientation change detected (${orientation}) but debouncing (${((500 - (now - lastOrientationLogTs.current))/1000).toFixed(2)}s remaining)`);
                             }
                         }
 
@@ -255,9 +251,6 @@ export default function HandTracker() {
                         setPalmScore(score);
                         
                         // Log palm score periodically (every 2 seconds)
-                        if (nowMs - (lastLogRef.current || 0) > 2000) {
-                            console.log(`[HandTracker] 📊 Palm Score: ${score.toFixed(3)} (raw: ${scoreRaw.toFixed(3)}) | Orientation: ${orientation || 'unknown'}`);
-                        }
                     } else {
                         setLandmarks(null, null, null, nowMs);
                         setPalmScore(null);
@@ -389,9 +382,6 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
     const nLen = Math.hypot(nx, ny, nz) || 1;
     const n = { x: nx / nLen, y: ny / nLen, z: nz / nLen };
 
-    // Log hand orientation normal every frame
-    console.log(`[Hand Normal] x: ${n.x.toFixed(4)}, y: ${n.y.toFixed(4)}, z: ${n.z.toFixed(4)} | Handedness: ${handedness || 'unknown'}`);
-
     // Depth statistics: compare palm center-ish joints vs finger tips to detect facing.
     const baseZs = [lms[5].z, lms[9].z, lms[13].z, lms[17].z]; // MCP joints
     const tipZs = [lms[8].z, lms[12].z, lms[16].z, lms[20].z]; // finger tips
@@ -427,27 +417,15 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
     const PALM_THRESHOLD = 0.6; // enter palm if score > this (was 0.4)
     const BACK_THRESHOLD = -0.6; // enter back if score < this (was -0.4)
     
-    // Log palm score every frame to debug orientation detection
-    console.log(`[Palm Score] ${palmScore.toFixed(3)} | Normal.z: ${n.z.toFixed(3)} | Handedness: ${handedness || 'unknown'} | Thresholds: palm>${PALM_THRESHOLD}, back<${BACK_THRESHOLD}`);
-    
     let result: 'palm' | 'back';
-    let changed = false;
     
     if (prev === 'palm') {
         result = palmScore < BACK_THRESHOLD ? 'back' : 'palm';
-        changed = result !== prev;
     } else if (prev === 'back') {
         result = palmScore > PALM_THRESHOLD ? 'palm' : 'back';
-        changed = result !== prev;
     } else {
         // Initial classification
         result = palmScore >= 0 ? 'palm' : 'back';
-        changed = true;
-    }
-    
-    // Log orientation detection details (throttled to avoid spam)
-    if (changed && Math.random() < 0.1) { // 10% sample rate to avoid log spam
-        console.log(`[detectHandOrientation] Score: ${palmScore.toFixed(3)}, Prev: ${prev}, Result: ${result}, Changed: ${changed}`);
     }
 
     return result;
