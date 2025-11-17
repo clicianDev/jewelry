@@ -63,7 +63,7 @@ export default function App() {
                 {/* <VideoEnvironment /> */}
 
                 {/* Environment for realistic reflections */}
-                <Environment preset="city" resolution={1080} />
+                <Environment files="/studio_small_08_1k.hdr" resolution={1080} />
                 <Postprocessing />
                 {/* Wrap ring for smooth transitions */}
                 <RingPresence show={showRing} assetUrl={activeRing.assetUrl} />
