@@ -21,7 +21,7 @@ const FINGER_CHAINS = [
   [17, 18, 19, 20],
 ] as const;
 
-const DEFAULT_MODEL_INNER_DIAMETER_RATIO = 0.78; // baseline calibration for solitaire ring model
+const DEFAULT_MODEL_INNER_DIAMETER_RATIO = 0.78;
 const MODEL_INNER_DIAMETER_RATIO_MAP: Record<string, number> = {
   [ringUrl]: 0.78,
   [classicRingUrl]: 0.92,
@@ -34,6 +34,15 @@ const MICRO_JITTER_CONFIG = {
 } as const;
 
 const MIN_ADAPTIVE_ALPHA = 0.001;
+const SMOOTH_EPS = 1e-3;
+
+// Helper functions
+function distance3(a: Vec3Like, b: Vec3Like) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
 
 function applyMicroJitterDamping(
   alpha: number,
@@ -42,21 +51,169 @@ function applyMicroJitterDamping(
   strength: number
 ) {
   if (!Number.isFinite(alpha)) return alpha;
-  if (motion <= 0 || motion >= threshold) {
-    return Math.min(alpha, 1);
-  }
+  if (motion <= 0 || motion >= threshold) return Math.min(alpha, 1);
+  
   const normalized = 1 - motion / threshold;
   const damping = 1 - strength * normalized * normalized;
   const damped = alpha * damping;
   return THREE.MathUtils.clamp(damped, MIN_ADAPTIVE_ALPHA, 1);
 }
 
-function distance3(a: Vec3Like, b: Vec3Like) {
-  return Math.sqrt(
-    (a.x - b.x) * (a.x - b.x) +
-      (a.y - b.y) * (a.y - b.y) +
-      (a.z - b.z) * (a.z - b.z)
-  );
+function computeSmoothingAlpha(
+  response: number,
+  delta: number,
+  smoothingStrength: number,
+  baseStrength = 0,
+  attenuation = 1
+) {
+  const sliderStrength = THREE.MathUtils.clamp(smoothingStrength ?? 0, 0, 1);
+  const combinedStrength = Math.max(baseStrength, sliderStrength);
+  
+  if (combinedStrength <= SMOOTH_EPS) return 1;
+
+  const clampedStrength = THREE.MathUtils.clamp(combinedStrength, SMOOTH_EPS, 1);
+  const baseAlpha = 1 - Math.exp(-response * clampedStrength * delta);
+
+  const attenuationBoost = THREE.MathUtils.clamp(1 - attenuation, 0, 1);
+  if (attenuationBoost <= SMOOTH_EPS) return baseAlpha;
+
+  return THREE.MathUtils.lerp(baseAlpha, 1, attenuationBoost * 0.8);
+}
+
+function calculateHandClosure(landmarks: Array<{ x: number; y: number; z: number }>) {
+  let closureTotal = 0;
+  let closureCount = 0;
+  
+  for (const chain of FINGER_CHAINS) {
+    const [mcpIdx, pipIdx, dipIdx, tipIdx] = chain;
+    const mcp = landmarks[mcpIdx];
+    const pip = landmarks[pipIdx];
+    const dip = landmarks[dipIdx];
+    const tip = landmarks[tipIdx];
+    
+    if (!mcp || !pip || !dip || !tip) continue;
+    
+    const fingerLength = distance3(mcp, pip) + distance3(pip, dip) + distance3(dip, tip);
+    if (fingerLength <= 1e-4) continue;
+    
+    const spread = distance3(mcp, tip) / fingerLength;
+    const curl = THREE.MathUtils.clamp(1 - spread, 0, 1);
+    closureTotal += curl;
+    closureCount++;
+  }
+  
+  return closureCount > 0 ? closureTotal / closureCount : 0;
+}
+
+function calculateAnchorPoint(
+  p13: Vec3Like,
+  p14: Vec3Like,
+  bias13: number,
+  alongFinger: number
+) {
+  const bias14 = 1 - bias13;
+  let x = p13.x * bias13 + p14.x * bias14;
+  let y = p13.y * bias13 + p14.y * bias14;
+  
+  if (alongFinger !== 0) {
+    x += (p14.x - p13.x) * alongFinger;
+    y += (p14.y - p13.y) * alongFinger;
+  }
+  
+  return { x, y };
+}
+
+function calculateMotionAttenuation(
+  rawDelta: number,
+  threshold: number,
+  power: number,
+  min: number
+) {
+  if (rawDelta <= 0) return 1;
+  
+  const motionFactorNorm = THREE.MathUtils.clamp(rawDelta / threshold, 0, 1);
+  const motionIntensity = Math.pow(motionFactorNorm, 0.9);
+  return Math.max(min, 1 - motionIntensity * power);
+}
+
+function applyDeadzone(
+  anchorX: number,
+  anchorY: number,
+  prevX: number,
+  prevY: number,
+  deadzone: number
+): { x: number; y: number } {
+  if (deadzone <= 0) return { x: anchorX, y: anchorY };
+  
+  const deltaX = anchorX - prevX;
+  const deltaY = anchorY - prevY;
+  const diff = Math.hypot(deltaX, deltaY);
+  
+  if (diff < deadzone) {
+    const softness = THREE.MathUtils.clamp(diff / Math.max(deadzone, 1e-6), 0, 1);
+    const eased = softness * softness * (3 - 2 * softness);
+    return {
+      x: prevX + deltaX * eased,
+      y: prevY + deltaY * eased
+    };
+  }
+  
+  if (diff < deadzone * 3) {
+    const t = (diff - deadzone) / (deadzone * 2);
+    const eased = THREE.MathUtils.clamp(t, 0, 1);
+    return {
+      x: THREE.MathUtils.lerp(prevX, anchorX, eased),
+      y: THREE.MathUtils.lerp(prevY, anchorY, eased)
+    };
+  }
+  
+  return { x: anchorX, y: anchorY };
+}
+
+function calculateOrientationTransition(
+  orientation: 'palm' | 'back' | null,
+  palmScore: number | null,
+  scoreEps: number
+) {
+  const normalizedPalmScore = palmScore != null
+    ? THREE.MathUtils.clamp(palmScore, -1, 1)
+    : orientation === "back"
+    ? -1
+    : orientation === "palm"
+    ? 1
+    : 0;
+
+  const scoreTransition = THREE.MathUtils.clamp(0.5 - 0.5 * normalizedPalmScore, 0, 1);
+  let targetTransition = orientation === "back" ? 1 : orientation === "palm" ? 0 : scoreTransition;
+  
+  const scoreWeight = palmScore != null
+    ? THREE.MathUtils.clamp((Math.abs(normalizedPalmScore) - scoreEps) / Math.max(1 - scoreEps, 1e-5), 0, 1)
+    : 0;
+    
+  if (scoreWeight > 0) {
+    const blendedScoreTarget = THREE.MathUtils.lerp(targetTransition, scoreTransition, scoreWeight);
+    if (orientation === "back") {
+      targetTransition = Math.min(targetTransition, blendedScoreTarget);
+    } else if (orientation === "palm") {
+      targetTransition = Math.max(targetTransition, blendedScoreTarget);
+    } else {
+      targetTransition = blendedScoreTarget;
+    }
+  }
+  
+  return { targetTransition, normalizedPalmScore };
+}
+
+function blendRotations(
+  palmRotation: { x: number; y: number; z: number },
+  backRotation: { x: number; y: number; z: number },
+  transition: number
+) {
+  return {
+    x: THREE.MathUtils.lerp(palmRotation.x, backRotation.x, transition),
+    y: THREE.MathUtils.lerp(palmRotation.y, backRotation.y, transition),
+    z: THREE.MathUtils.lerp(palmRotation.z, backRotation.z, transition),
+  };
 }
 
 export default function Ring({ modelUrl }: RingProps) {
@@ -295,31 +452,8 @@ export default function Ring({ modelUrl }: RingProps) {
       }
 
       const smoothingStrength = positionSmoothing ?? 0;
-      const SMOOTH_EPS = 1e-3;
-      const computeAlpha = (
-        response: number,
-        baseStrength = 0,
-        attenuation = 1
-      ) => {
-        const sliderStrength = THREE.MathUtils.clamp(smoothingStrength ?? 0, 0, 1);
-        const combinedStrength = Math.max(baseStrength, sliderStrength);
-        
-        // For instant response, bypass smoothing when strength is low
-        if (combinedStrength <= SMOOTH_EPS) {
-          return 1; // Instant update
-        }
-
-        const clampedStrength = THREE.MathUtils.clamp(combinedStrength, SMOOTH_EPS, 1);
-        const baseAlpha = 1 - Math.exp(-response * clampedStrength * delta);
-
-        const attenuationBoost = THREE.MathUtils.clamp(1 - attenuation, 0, 1);
-        if (attenuationBoost <= SMOOTH_EPS) {
-          return baseAlpha;
-        }
-
-        // Blend towards instant response when motion detected
-        return THREE.MathUtils.lerp(baseAlpha, 1, attenuationBoost * 0.8); // More aggressive blend to instant
-      };
+      const computeAlpha = (response: number, baseStrength = 0, attenuation = 1) =>
+        computeSmoothingAlpha(response, delta, smoothingStrength, baseStrength, attenuation);
   const nowTs = typeof performance !== "undefined" ? performance.now() : Date.now();
   const dataAgeMs = landmarksTimestamp != null ? Math.max(0, nowTs - landmarksTimestamp) : 0;
       const lookaheadMs = Math.max(0, motionLookaheadMs ?? 0) + dataAgeMs;
@@ -327,15 +461,9 @@ export default function Ring({ modelUrl }: RingProps) {
 
       // Weighted midpoint between ring finger MCP (13) and PIP (14) with bias toward 13 (base of finger)
       const bias13 = THREE.MathUtils.lerp(DEFAULT_BIAS_TOWARD_13, 0, anchorToward14);
-      const bias14 = 1 - bias13;
-      let rawAnchorX = p13.x * bias13 + p14.x * bias14;
-      let rawAnchorY = p13.y * bias13 + p14.y * bias14;
-      if (alongFinger !== 0) {
-        const segX = p14.x - p13.x;
-        const segY = p14.y - p13.y;
-        rawAnchorX += segX * alongFinger;
-        rawAnchorY += segY * alongFinger;
-      }
+      const rawAnchor = calculateAnchorPoint(p13, p14, bias13, alongFinger);
+      let rawAnchorX = rawAnchor.x;
+      let rawAnchorY = rawAnchor.y;
 
       let rawDelta = 0;
       let smoothingAttenuation = 1;
@@ -354,15 +482,11 @@ export default function Ring({ modelUrl }: RingProps) {
       prevRawAnchorNorm.current.y = rawAnchorY;
 
       if (rawDelta > 0) {
-        const motionFactorNorm = THREE.MathUtils.clamp(
-          rawDelta / MOTION_ATTENUATION_THRESHOLD,
-          0,
-          1
-        );
-        const motionIntensity = Math.pow(motionFactorNorm, 0.9);
-        smoothingAttenuation = Math.max(
-          MOTION_ATTENUATION_MIN,
-          1 - motionIntensity * MOTION_ATTENUATION_POWER
+        smoothingAttenuation = calculateMotionAttenuation(
+          rawDelta,
+          MOTION_ATTENUATION_THRESHOLD,
+          MOTION_ATTENUATION_POWER,
+          MOTION_ATTENUATION_MIN
         );
       }
 
@@ -373,20 +497,13 @@ export default function Ring({ modelUrl }: RingProps) {
         const s13 = landmarksStabilized[13];
         const s14 = landmarksStabilized[14];
         if (s13 && s14) {
-          let stableX = s13.x * bias13 + s14.x * bias14;
-          let stableY = s13.y * bias13 + s14.y * bias14;
-          if (alongFinger !== 0) {
-            const segXs = s14.x - s13.x;
-            const segYs = s14.y - s13.y;
-            stableX += segXs * alongFinger;
-            stableY += segYs * alongFinger;
-          }
+          const stableAnchor = calculateAnchorPoint(s13, s14, bias13, alongFinger);
 
           const velocityCut = Math.max(0.0005, jitterVelocityCutoff);
           const velocityRatio = THREE.MathUtils.clamp(rawDelta / velocityCut, 0, 1);
           const blendWeight = jitterBlend * (1 - velocityRatio);
-          anchorX = THREE.MathUtils.lerp(anchorX, stableX, blendWeight);
-          anchorY = THREE.MathUtils.lerp(anchorY, stableY, blendWeight);
+          anchorX = THREE.MathUtils.lerp(anchorX, stableAnchor.x, blendWeight);
+          anchorY = THREE.MathUtils.lerp(anchorY, stableAnchor.y, blendWeight);
         }
       }
 
@@ -396,22 +513,15 @@ export default function Ring({ modelUrl }: RingProps) {
       if (!filteredAnchorInitialized.current) {
         filteredAnchorInitialized.current = true;
       } else {
-        const deltaX = anchorX - prevFilteredAnchorNorm.current.x;
-        const deltaY = anchorY - prevFilteredAnchorNorm.current.y;
-        const diff = Math.hypot(deltaX, deltaY);
-        if (deadzone > 0) {
-          if (diff < deadzone) {
-            const softness = THREE.MathUtils.clamp(diff / Math.max(deadzone, 1e-6), 0, 1);
-            const eased = softness * softness * (3 - 2 * softness);
-            filteredX = prevFilteredAnchorNorm.current.x + deltaX * eased;
-            filteredY = prevFilteredAnchorNorm.current.y + deltaY * eased;
-          } else if (diff < deadzone * 3) {
-            const t = (diff - deadzone) / (deadzone * 2);
-            const eased = THREE.MathUtils.clamp(t, 0, 1);
-            filteredX = THREE.MathUtils.lerp(prevFilteredAnchorNorm.current.x, anchorX, eased);
-            filteredY = THREE.MathUtils.lerp(prevFilteredAnchorNorm.current.y, anchorY, eased);
-          }
-        }
+        const filtered = applyDeadzone(
+          anchorX,
+          anchorY,
+          prevFilteredAnchorNorm.current.x,
+          prevFilteredAnchorNorm.current.y,
+          deadzone
+        );
+        filteredX = filtered.x;
+        filteredY = filtered.y;
       }
 
       if (!microAnchorInitialized.current) {
@@ -595,25 +705,8 @@ export default function Ring({ modelUrl }: RingProps) {
         const offsetYRad = THREE.MathUtils.degToRad(rotationOffsetY);
         const offsetZRad = THREE.MathUtils.degToRad(rotationOffsetZ);
         const closureOffsetZRad = THREE.MathUtils.degToRad(closureOffsetZ);
-        let closureTotal = 0;
-        let closureCount = 0;
-        for (const chain of FINGER_CHAINS) {
-          const [mcpIdx, pipIdx, dipIdx, tipIdx] = chain;
-          const mcp = lms[mcpIdx];
-          const pip = lms[pipIdx];
-          const dip = lms[dipIdx];
-          const tip = lms[tipIdx];
-          if (!mcp || !pip || !dip || !tip) continue;
-          const fingerLength =
-            distance3(mcp, pip) + distance3(pip, dip) + distance3(dip, tip);
-          if (fingerLength <= 1e-4) continue;
-          const spread = distance3(mcp, tip) / fingerLength;
-          const curl = THREE.MathUtils.clamp(1 - spread, 0, 1);
-          closureTotal += curl;
-          closureCount++;
-        }
-        const closureRaw = closureCount > 0 ? closureTotal / closureCount : 0;
-        const closureAlpha = computeAlpha(CLOSURE_RESPONSE, 0.05, smoothingAttenuation); // Much lower base strength (was 0.18)
+        const closureRaw = calculateHandClosure(lms);
+        const closureAlpha = computeAlpha(CLOSURE_RESPONSE, 0.05, smoothingAttenuation);
         smoothedHandClosure.current = THREE.MathUtils.lerp(
           smoothedHandClosure.current,
           closureRaw,
@@ -654,23 +747,22 @@ export default function Ring({ modelUrl }: RingProps) {
           MICRO_JITTER_CONFIG.rotation.strength * 0.8
         );
         
-        // Smooth orientation transition to prevent jitter when rotating hand
-        const normalizedPalmScore = palmScore != null
+        // Shift ring along Y as the hand rotates so it hugs the finger.
+        const approxFingerRadius = Math.max(
+          0.001,
+          desiredWorldDiameter > 0
+            ? desiredWorldDiameter * 0.5
+            : (baseDiameter.current ?? 1) * targetScale.current * 0.5
+        );
+        
+        const palmScoreNormalized = palmScore != null
           ? THREE.MathUtils.clamp(palmScore, -1, 1)
           : orientation === "back"
           ? -1
           : orientation === "palm"
           ? 1
           : 0;
-
-  // Shift ring along Y as the hand rotates so it hugs the finger.
-  const approxFingerRadius = Math.max(
-          0.001,
-          desiredWorldDiameter > 0
-            ? desiredWorldDiameter * 0.5
-            : (baseDiameter.current ?? 1) * targetScale.current * 0.5
-        );
-        const rotationInfluence = normalizedPalmScore;
+        const rotationInfluence = palmScoreNormalized;
         const targetPosY =
           positionOffsetY +
           rotationOffsetPositionY * approxFingerRadius * rotationInfluence;
@@ -699,22 +791,14 @@ export default function Ring({ modelUrl }: RingProps) {
 
         userRotationGroup.current.position.y = smoothedRotationYOffset.current;
         userRotationGroup.current.position.z = basePosZ + closurePosZ;
-        const scoreTransition = THREE.MathUtils.clamp(0.5 - 0.5 * normalizedPalmScore, 0, 1);
-        let targetTransition = orientation === "back" ? 1 : orientation === "palm" ? 0 : scoreTransition;
-        const scoreWeight = palmScore != null
-          ? THREE.MathUtils.clamp((Math.abs(normalizedPalmScore) - SCORE_EPS) / Math.max(1 - SCORE_EPS, 1e-5), 0, 1)
-          : 0;
-        if (scoreWeight > 0) {
-          const blendedScoreTarget = THREE.MathUtils.lerp(targetTransition, scoreTransition, scoreWeight);
-          if (orientation === "back") {
-            targetTransition = Math.min(targetTransition, blendedScoreTarget);
-          } else if (orientation === "palm") {
-            targetTransition = Math.max(targetTransition, blendedScoreTarget);
-          } else {
-            targetTransition = blendedScoreTarget;
-          }
-        }
-        const transitionAlpha = 1 - Math.exp(-12 * delta); // Smooth but responsive transition
+        
+        const { targetTransition } = calculateOrientationTransition(
+          orientation,
+          palmScore,
+          SCORE_EPS
+        );
+        
+        const transitionAlpha = 1 - Math.exp(-12 * delta);
         orientationTransition.current = THREE.MathUtils.lerp(
           orientationTransition.current,
           targetTransition,
@@ -743,12 +827,11 @@ export default function Ring({ modelUrl }: RingProps) {
           z: offsetZRad,
         };
         
-        // Blend between orientations based on transition state
-        const blendedRotation = {
-          x: THREE.MathUtils.lerp(palmRotation.x, backRotation.x, orientationTransition.current),
-          y: THREE.MathUtils.lerp(palmRotation.y, backRotation.y, orientationTransition.current),
-          z: THREE.MathUtils.lerp(palmRotation.z, backRotation.z, orientationTransition.current),
-        };
+        const blendedRotation = blendRotations(
+          palmRotation,
+          backRotation,
+          orientationTransition.current
+        );
 
         // Apply additional smoothing to rotation changes (X axis follows instantly to avoid lag)
         const rotationSmoothAlpha = 1 - Math.exp(-15 * delta);
