@@ -175,7 +175,7 @@ export default function Ring({ modelUrl }: RingProps) {
     jitterVelocityCutoff: { label: "Blend Cutoff", value: 0.01, min: 0.001, max: 0.1, step: 0.001 }, // Lower for faster blend-out
     jitterDeadzone: { label: "Jitter Deadzone", value: 0.0008, min: 0, max: 0.015, step: 0.0001 }, // Smaller for more responsiveness
   });
-  const { rotationOffsetX, rotationOffsetY, rotationOffsetZ, closureOffsetZ, positionOffsetZ, positionOffsetY, rotationOffsetPositionY, closureOffsetPositionZ } = useControls('Ring Orientation', {
+  const { rotationOffsetX, rotationOffsetY, rotationOffsetZ, closureOffsetZ, positionOffsetZ, positionOffsetY, rotationOffsetPositionY, closureOffsetPositionZ, closureScaleBoost } = useControls('Ring Orientation', {
     rotationOffsetX: { label: "Offset X (°)", value: 25, min: -180, max: 180, step: 0.5 },
     rotationOffsetY: { label: "Offset Y (°)", value: 0, min: -180, max: 180, step: 0.5 },
     rotationOffsetZ: { label: "Offset Z (°)", value: 0, min: -180, max: 180, step: 0.5 },
@@ -184,6 +184,7 @@ export default function Ring({ modelUrl }: RingProps) {
     positionOffsetY: { label: "Base Pos Y", value: 0, min: -20, max: 20, step: 0.05 },
     rotationOffsetPositionY: { label: "Rotate Adjust Pos Y", value: 0.25, min: -5, max: 5, step: 0.01 },
     closureOffsetPositionZ: { label: "Close Adjust Pos", value: 1.5, min: 0, max: 10, step: 0.05 },
+    closureScaleBoost: { label: "Close Scale Boost", value: 0.5, min: 0, max: 4, step: 0.01 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
   // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
@@ -565,7 +566,6 @@ export default function Ring({ modelUrl }: RingProps) {
           fitScale,
           scaleAlpha
         );
-        group.current.scale.setScalar(targetScale.current);
       }
 
       group.current.lookAt(camera.position);
@@ -587,6 +587,7 @@ export default function Ring({ modelUrl }: RingProps) {
       viewAxisAngle.current = curr + diff * angleAlpha;
       group.current.rotation.z = viewAxisAngle.current;
 
+      let closureScaleMultiplier = 1;
       if (userRotationGroup.current) {
         const rotationOffsetXDeg =
           handedness?.toLowerCase() === "right" ? -50.0 : rotationOffsetX;
@@ -618,6 +619,12 @@ export default function Ring({ modelUrl }: RingProps) {
           closureRaw,
           closureAlpha
         );
+        if (orientation === "back") {
+          closureScaleMultiplier = Math.max(
+            0.01,
+            1 + closureScaleBoost * smoothedHandClosure.current
+          );
+        }
         const closureZ =
           orientation === "back"
             ? closureOffsetZRad * smoothedHandClosure.current
@@ -768,6 +775,9 @@ export default function Ring({ modelUrl }: RingProps) {
         );
 
         const logNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+      const safeScaleMultiplier = Math.max(0.01, closureScaleMultiplier);
+      group.current.scale.setScalar(targetScale.current * safeScaleMultiplier);
         if (!Number.isFinite(lastTransformLogTs.current) || logNow - lastTransformLogTs.current >= 1000) {
           const offsetRotationDeg = {
             x: rotationOffsetXDeg,
@@ -847,6 +857,7 @@ export default function Ring({ modelUrl }: RingProps) {
       prevRotation.current = { x: 0, y: 0, z: 0 };
       rotationYOffsetInitialized.current = false;
       smoothedRotationYOffset.current = positionOffsetY;
+      group.current.scale.setScalar(targetScale.current);
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
       group.current.rotation.y += delta * 0.6;
