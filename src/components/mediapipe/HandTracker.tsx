@@ -312,7 +312,7 @@ export default function HandTracker() {
 
     return (
         <div style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
-            <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: ready ? "block" : "none" }}/>
+            <canvas ref={canvasRef} style={{ width: "100%", height: "100%", objectFit: "cover", display: ready ? "block" : "none" }}/>
             {/* Keep video mounted for Safari autoplay policy */}
             <video ref={videoRef} playsInline muted style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
             {/* Display guidance overlay if no hand detected (after camera ready) */}

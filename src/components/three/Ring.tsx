@@ -545,8 +545,31 @@ export default function Ring({ modelUrl }: RingProps) {
       prevFilteredAnchorNorm.current.x = anchorNormX;
       prevFilteredAnchorNorm.current.y = anchorNormY;
 
-      const mirroredX = 1 - anchorNormX; // account for mirrored video
-      ndc.current.set(mirroredX * 2 - 1, -(anchorNormY * 2 - 1), 0.5);
+      // Account for object-fit: cover cropping
+      // Video is 640x480 (4:3), container is 360x480 (3:4)
+      // The video is cropped on left/right sides
+      const videoAspect = 640 / 480; // 1.333 (4:3)
+      const containerAspect = size.width / size.height;
+      
+      let adjustedX = anchorNormX;
+      let adjustedY = anchorNormY;
+      
+      if (videoAspect > containerAspect) {
+        // Video is wider - crops left/right (this is our case)
+        const visibleWidthRatio = containerAspect / videoAspect;
+        const cropOffset = (1 - visibleWidthRatio) / 2;
+        adjustedX = (anchorNormX - cropOffset) / visibleWidthRatio;
+        adjustedX = THREE.MathUtils.clamp(adjustedX, 0, 1);
+      } else {
+        // Video is taller - crops top/bottom
+        const visibleHeightRatio = videoAspect / containerAspect;
+        const cropOffset = (1 - visibleHeightRatio) / 2;
+        adjustedY = (anchorNormY - cropOffset) / visibleHeightRatio;
+        adjustedY = THREE.MathUtils.clamp(adjustedY, 0, 1);
+      }
+
+      const mirroredX = 1 - adjustedX; // account for mirrored video
+      ndc.current.set(mirroredX * 2 - 1, -(adjustedY * 2 - 1), 0.5);
       // Unproject from NDC to world: create a ray from camera through ndc
       ndc.current.unproject(camera);
       dir.current.copy(ndc.current).sub(camera.position).normalize();
