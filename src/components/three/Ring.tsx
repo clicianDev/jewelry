@@ -115,6 +115,8 @@ export default function Ring({ modelUrl }: RingProps) {
   const microAnchorNorm = useRef(new THREE.Vector2());
   const microAnchorInitialized = useRef(false);
   const smoothedHandClosure = useRef(0);
+  const smoothedRotationYOffset = useRef(0);
+  const rotationYOffsetInitialized = useRef(false);
   const lastTransformLogTs = useRef(0);
 
   // Smooth orientation transitions to prevent jitter when rotating hand
@@ -173,12 +175,14 @@ export default function Ring({ modelUrl }: RingProps) {
     jitterVelocityCutoff: { label: "Blend Cutoff", value: 0.01, min: 0.001, max: 0.1, step: 0.001 }, // Lower for faster blend-out
     jitterDeadzone: { label: "Jitter Deadzone", value: 0.0008, min: 0, max: 0.015, step: 0.0001 }, // Smaller for more responsiveness
   });
-  const { rotationOffsetX, rotationOffsetY, rotationOffsetZ, closureOffsetZ, positionOffsetZ, closureOffsetPositionZ } = useControls('Ring Orientation', {
+  const { rotationOffsetX, rotationOffsetY, rotationOffsetZ, closureOffsetZ, positionOffsetZ, positionOffsetY, rotationOffsetPositionY, closureOffsetPositionZ } = useControls('Ring Orientation', {
     rotationOffsetX: { label: "Offset X (°)", value: 25, min: -180, max: 180, step: 0.5 },
     rotationOffsetY: { label: "Offset Y (°)", value: 0, min: -180, max: 180, step: 0.5 },
     rotationOffsetZ: { label: "Offset Z (°)", value: 0, min: -180, max: 180, step: 0.5 },
     closureOffsetZ: { label: "Close Adjust Z (°)", value: 80, min: 0, max: 90, step: 0.5 },
     positionOffsetZ: { label: "Base Pos Z", value: -5.4, min: -20, max: 20, step: 0.05 },
+    positionOffsetY: { label: "Base Pos Y", value: 0, min: -20, max: 20, step: 0.05 },
+    rotationOffsetPositionY: { label: "Rotate Adjust Pos Y", value: 0.25, min: -5, max: 5, step: 0.01 },
     closureOffsetPositionZ: { label: "Close Adjust Pos", value: 1.5, min: 0, max: 10, step: 0.05 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
@@ -623,7 +627,6 @@ export default function Ring({ modelUrl }: RingProps) {
           orientation === "back"
             ? -closureOffsetPositionZ * smoothedHandClosure.current
             : 0;
-        userRotationGroup.current.position.z = basePosZ + closurePosZ;
         const TILT_MAX_RAD = THREE.MathUtils.degToRad(35);
         const SCORE_EPS = 0.12;
         const hasScore = palmScore != null && Math.abs(palmScore) > SCORE_EPS;
@@ -652,6 +655,43 @@ export default function Ring({ modelUrl }: RingProps) {
           : orientation === "palm"
           ? 1
           : 0;
+
+  // Shift ring along Y as the hand rotates so it hugs the finger.
+  const approxFingerRadius = Math.max(
+          0.001,
+          desiredWorldDiameter > 0
+            ? desiredWorldDiameter * 0.5
+            : (baseDiameter.current ?? 1) * targetScale.current * 0.5
+        );
+        const rotationInfluence = normalizedPalmScore;
+        const targetPosY =
+          positionOffsetY +
+          rotationOffsetPositionY * approxFingerRadius * rotationInfluence;
+
+        let posYAlpha = computeAlpha(POSITION_DAMP, 0.05, smoothingAttenuation);
+        posYAlpha = applyMicroJitterDamping(
+          posYAlpha,
+          anchorMotionMagnitude.current,
+          MICRO_JITTER_CONFIG.position.threshold,
+          MICRO_JITTER_CONFIG.position.strength
+        );
+
+        if (
+          !rotationYOffsetInitialized.current ||
+          !Number.isFinite(smoothedRotationYOffset.current)
+        ) {
+          smoothedRotationYOffset.current = targetPosY;
+          rotationYOffsetInitialized.current = true;
+        } else {
+          smoothedRotationYOffset.current = THREE.MathUtils.lerp(
+            smoothedRotationYOffset.current,
+            targetPosY,
+            posYAlpha
+          );
+        }
+
+        userRotationGroup.current.position.y = smoothedRotationYOffset.current;
+        userRotationGroup.current.position.z = basePosZ + closurePosZ;
         const scoreTransition = THREE.MathUtils.clamp(0.5 - 0.5 * normalizedPalmScore, 0, 1);
         let targetTransition = orientation === "back" ? 1 : orientation === "palm" ? 0 : scoreTransition;
         const scoreWeight = palmScore != null
@@ -805,10 +845,13 @@ export default function Ring({ modelUrl }: RingProps) {
       orientationTransition.current = 0;
       smoothedOrientation.current = null;
       prevRotation.current = { x: 0, y: 0, z: 0 };
+      rotationYOffsetInitialized.current = false;
+      smoothedRotationYOffset.current = positionOffsetY;
       // Idle rotation when no hand
       group.current.rotation.x += delta * 0.8;
       group.current.rotation.y += delta * 0.6;
       if (userRotationGroup.current) {
+        userRotationGroup.current.position.y = positionOffsetY;
         userRotationGroup.current.position.z = positionOffsetZ;
       }
     }
