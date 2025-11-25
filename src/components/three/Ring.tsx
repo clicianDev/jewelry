@@ -323,7 +323,7 @@ export default function Ring({ modelUrl }: RingProps) {
   // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
   // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
   const { fitAdjust, anchorToward14, alongFinger, positionSmoothing, motionLookaheadMs, jitterBlend, jitterVelocityCutoff, jitterDeadzone } = useControls('Ring Fit', {
-    fitAdjust: { value: 1.8, min: 0.5, max: 2.0, step: 0.01 },
+    fitAdjust: { value: 2.0, min: 0.5, max: 2.5, step: 0.01 },
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
     positionSmoothing: { label: "Smoothing Amount", value: 0, min: 0, max: 1, step: 0.05 },
@@ -856,10 +856,10 @@ export default function Ring({ modelUrl }: RingProps) {
           orientationTransition.current
         );
 
-        // Apply additional smoothing to rotation changes (X axis follows instantly to avoid lag)
+        // Apply additional smoothing to rotation changes (X and Y axes follow instantly to avoid lag)
         const rotationSmoothAlpha = 1 - Math.exp(-15 * delta);
         prevRotation.current.x = blendedRotation.x;
-        prevRotation.current.y = THREE.MathUtils.lerp(prevRotation.current.y, blendedRotation.y, rotationSmoothAlpha);
+        prevRotation.current.y = blendedRotation.y;
         prevRotation.current.z = THREE.MathUtils.lerp(prevRotation.current.z, blendedRotation.z, rotationSmoothAlpha);
         
         // Limit palm orientation rotation to max -150° for LEFT hand only
