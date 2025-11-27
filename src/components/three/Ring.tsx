@@ -856,29 +856,20 @@ export default function Ring({ modelUrl }: RingProps) {
           z: offsetZRad,
         };
         
+        // Always update tiltX for smooth transitions
+        tiltX.current = THREE.MathUtils.lerp(tiltX.current, targetTilt, tiltAlpha);
+        
         const blendedRotation = blendRotations(
           palmRotation,
           backRotation,
           orientationTransition.current
         );
 
-        // Apply additional smoothing to rotation changes (X and Y axes follow instantly to avoid lag)
-        const rotationSmoothAlpha = 1 - Math.exp(-15 * delta);
-        prevRotation.current.x = blendedRotation.x;
-        prevRotation.current.y = blendedRotation.y;
+        // Apply smoothing to all rotation axes for smooth transitions
+        const rotationSmoothAlpha = 1 - Math.exp(-18 * delta);
+        prevRotation.current.x = THREE.MathUtils.lerp(prevRotation.current.x, blendedRotation.x, rotationSmoothAlpha);
+        prevRotation.current.y = THREE.MathUtils.lerp(prevRotation.current.y, blendedRotation.y, rotationSmoothAlpha);
         prevRotation.current.z = THREE.MathUtils.lerp(prevRotation.current.z, blendedRotation.z, rotationSmoothAlpha);
-        
-        // Limit palm orientation rotation to max -150° for LEFT hand only
-        // const MAX_PALM_ROTATION_LEFT = THREE.MathUtils.degToRad(-150);
-        // if (orientation === "palm" && prevRotation.current.x < MAX_PALM_ROTATION_LEFT) {
-        //   prevRotation.current.x = MAX_PALM_ROTATION_LEFT;
-        // }
-        
-        
-        // Only update tiltX when in back orientation
-        if (orientationTransition.current > 0.5) {
-          tiltX.current = THREE.MathUtils.lerp(tiltX.current, targetTilt, tiltAlpha);
-        }
         
         userRotationGroup.current.rotation.set(
           prevRotation.current.x,
