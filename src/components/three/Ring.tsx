@@ -341,7 +341,7 @@ export default function Ring({ modelUrl }: RingProps) {
     positionOffsetY: { label: "Base Pos Y", value: 0, min: -20, max: 20, step: 0.05 },
     rotationOffsetPositionY: { label: "Rotate Adjust Pos Y", value: 0.25, min: -5, max: 5, step: 0.01 },
     closureOffsetPositionZ: { label: "Close Adjust Pos", value: 1.5, min: 0, max: 10, step: 0.05 },
-    closureScaleBoost: { label: "Close Scale Boost", value: 0.5, min: 0, max: 4, step: 0.01 },
+    closureScaleBoost: { label: "Close Scale Boost", value: 0.25, min: 0, max: 4, step: 0.01 },
   });
   // Independent base rotation controller (degrees for UX, converted to radians)
   // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
@@ -729,7 +729,7 @@ export default function Ring({ modelUrl }: RingProps) {
       let closureScaleMultiplier = 1;
       if (userRotationGroup.current) {
         const rotationOffsetXDeg =
-          handedness?.toLowerCase() === "right" ? -50.0 : rotationOffsetX;
+          handedness?.toLowerCase() === "right" ? -55.0 : rotationOffsetX;
         const offsetXRad = THREE.MathUtils.degToRad(rotationOffsetXDeg);
         const offsetYRad = THREE.MathUtils.degToRad(rotationOffsetY);
         const offsetZRad = THREE.MathUtils.degToRad(rotationOffsetZ);
