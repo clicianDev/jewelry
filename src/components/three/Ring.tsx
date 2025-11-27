@@ -320,10 +320,10 @@ export default function Ring({ modelUrl }: RingProps) {
   const WORLD_SPEED_ATTENUATION_POWER = 0.5; // less aggressive (was 0.75)
 
   // Exposed user tuning controls (via Leva) to fine tune size & anchor without code edits.
-  // fitAdjust: global scale multiplier. anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
+  // anchorToward14: 0 keeps original bias (toward 13), 1 moves fully to joint 14.
   // alongFinger: pushes further along the 13->14 segment (positive toward 14, negative back toward 13).
-  const { fitAdjust, anchorToward14, alongFinger, positionSmoothing, motionLookaheadMs, jitterBlend, jitterVelocityCutoff, jitterDeadzone } = useControls('Ring Fit', {
-    fitAdjust: { value: 2.0, min: 0.5, max: 2.5, step: 0.01 },
+  // Note: fitAdjust is now dynamic based on hand orientation (2.50 horizontal, 2.0 vertical)
+  const { anchorToward14, alongFinger, positionSmoothing, motionLookaheadMs, jitterBlend, jitterVelocityCutoff, jitterDeadzone } = useControls('Ring Fit', {
     anchorToward14: { value: 0.30, min: 0, max: 1, step: 0.01 },
     alongFinger: { value: 0.05, min: -0.3, max: 0.6, step: 0.005 },
     positionSmoothing: { label: "Smoothing Amount", value: 0, min: 0, max: 1, step: 0.05 },
@@ -682,8 +682,14 @@ export default function Ring({ modelUrl }: RingProps) {
         const modelInnerDiameter = baseDiameter.current * modelInnerDiameterRatio;
         const fitScaleRaw =
           ((desiredWorldDiameter * SNUG_FIT) / modelInnerDiameter) * depthScaleFactor;
+        
+        // Dynamic fitAdjust based on hand orientation: 2.50 for horizontal, 2.0 for vertical
+        const palmScoreAbs = palmScore != null ? Math.abs(palmScore) : 1;
+        const horizontalness = THREE.MathUtils.clamp(1 - palmScoreAbs, 0, 1); // 1 = horizontal, 0 = vertical
+        const dynamicFitAdjust = THREE.MathUtils.lerp(2.0, 2.50, horizontalness);
+        
         const fitScale = THREE.MathUtils.clamp(
-          fitScaleRaw * fitAdjust,
+          fitScaleRaw * dynamicFitAdjust,
           SCALE_MIN,
           SCALE_MAX
         );
