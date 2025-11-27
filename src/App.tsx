@@ -8,6 +8,7 @@ import HandTracker from "@/components/mediapipe/HandTracker";
 import { useHandStore } from "@/store/hands";
 import RingPresence from "@/components/three/RingPresense";
 import RingMenu, { type RingOption } from "@/components/ui/RingMenu";
+import InstructionsModal from "@/components/ui/InstructionsModal";
 import classicRingUrl from "@/assets/ring.glb";
 import diamondRingUrl from "@/assets/diamond_ring.glb";
 import diamondRingImg from "@/assets/images/diamond_ring.png";
@@ -15,6 +16,8 @@ import classicRingImg from "@/assets/images/ring.png";
 import "./App.css";
 
 export default function App() {
+  const [showModal, setShowModal] = useState(false);
+  const [trackingStarted, setTrackingStarted] = useState(false);
   const landmarks = useHandStore((state) => state.landmarks);
   const videoEl = useHandStore((state) => state.videoEl);
   const showRing = !!(landmarks?.length && videoEl);
@@ -50,36 +53,55 @@ export default function App() {
     <div className="app-shell">
       <section className="scene-panel" aria-label="Virtual ring preview">
         <div className="scene-panel__frame">
-          <div className="scene-panel__canvas">
-            <HandTracker />
-            <Canvas
-              dpr={[1, 2]}
-              shadows={{ type: THREE.PCFSoftShadowMap }}
-              gl={{ antialias: true, preserveDrawingBuffer: true }}
-              camera={{ position: [129, 82.1, 129], fov: 45 }}
-            >
-              <Suspense fallback={null}>
-                {/* Use Video as Environment (uncomment to enable) */}
-                {/* <VideoEnvironment /> */}
+          {!trackingStarted ? (
+            <div className="try-on-overlay">
+              <button 
+                className="try-on-button" 
+                onClick={() => setShowModal(true)}
+              >
+                Try On
+              </button>
+            </div>
+          ) : (
+            <div className="scene-panel__canvas">
+              <HandTracker />
+              <Canvas
+                dpr={[1, 2]}
+                shadows={{ type: THREE.PCFSoftShadowMap }}
+                gl={{ antialias: true, preserveDrawingBuffer: true }}
+                camera={{ position: [129, 82.1, 129], fov: 45 }}
+              >
+                <Suspense fallback={null}>
+                  {/* Use Video as Environment (uncomment to enable) */}
+                  {/* <VideoEnvironment /> */}
 
-                {/* Environment for realistic reflections */}
-                <Environment files="/studio_small_08_1k.hdr" resolution={1080} />
-                <Postprocessing />
-                {/* Wrap ring for smooth transitions */}
-                <RingPresence show={showRing} assetUrl={activeRing.assetUrl} />
-                {/* Preload all assets referenced in the scene */}
-                <Preload all />
-              </Suspense>
-              {/* Camera controls tuned for product viewing */}
-              {/* <OrbitControls maxDistance={200} minDistance={50} /> */}
-              {/* R3F default stats panel(FPS) */}
-              <Stats />
-            </Canvas>
-          </div>
+                  {/* Environment for realistic reflections */}
+                  <Environment files="/studio_small_08_1k.hdr" resolution={1080} />
+                  <Postprocessing />
+                  {/* Wrap ring for smooth transitions */}
+                  <RingPresence show={showRing} assetUrl={activeRing.assetUrl} />
+                  {/* Preload all assets referenced in the scene */}
+                  <Preload all />
+                </Suspense>
+                {/* Camera controls tuned for product viewing */}
+                {/* <OrbitControls maxDistance={200} minDistance={50} /> */}
+                {/* R3F default stats panel(FPS) */}
+                <Stats />
+              </Canvas>
+            </div>
+          )}
         </div>
         {/* Basic loading overlay with progress bar */}
         <Loader />
       </section>
+      
+      {/* Instructions Modal */}
+      <InstructionsModal 
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        onReady={() => setTrackingStarted(true)}
+      />
+      
       <RingMenu
         options={ringOptions}
         selectedId={selectedRingId}
