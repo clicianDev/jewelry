@@ -230,6 +230,102 @@ body {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
+/* Camera Error Styles */
+.camera-error-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.98) 100%);
+  z-index: 10;
+}
+
+.camera-error-content {
+  max-width: 420px;
+  padding: 40px 32px;
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+  text-align: center;
+}
+
+.camera-error-icon {
+  font-size: 4rem;
+  margin-bottom: 20px;
+  line-height: 1;
+}
+
+.camera-error-title {
+  margin: 0 0 12px 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.camera-error-message {
+  margin: 0 0 28px 0;
+  font-size: 0.95rem;
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.camera-error-instructions {
+  background: #f9fafb;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+.camera-error-instructions-title {
+  margin: 0 0 12px 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.camera-error-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.8;
+}
+
+.camera-error-list li {
+  margin-bottom: 8px;
+}
+
+.camera-error-list li:last-child {
+  margin-bottom: 0;
+}
+
+.camera-error-retry-button {
+  width: 100%;
+  padding: 16px 32px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background: #000000;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  font-family: inherit;
+}
+
+.camera-error-retry-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.camera-error-retry-button:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
 .ring-selector {
   flex: 1;
   display: flex;

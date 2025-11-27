@@ -4,6 +4,7 @@ import { useHandStore } from "@/store/hands";
 import { FilesetResolver, HandLandmarker, type HandLandmarkerResult } from "@mediapipe/tasks-vision";
 import type { Landmark } from "@/store/hands";
 import HandOverlay from "@/components/ui/HandOverlay";
+import CameraError from "@/components/ui/CameraError";
 import { EmaValue, LandmarkStabilizer } from "@/utils/stabilization";
 
 type StabilizationMode = 'responsive' | 'balanced' | 'stable';
@@ -17,6 +18,7 @@ export default function HandTracker() {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [ready, setReady] = useState(false);
     const [camError, setCamError] = useState<string | null>(null);
+    const [retryKey, setRetryKey] = useState(0);
     const landmarks = useHandStore((state) => state.landmarks);
     const setLandmarks = useHandStore((state) => state.setLandmarks);
     const landmarkBlend = useHandStore((state) => state.landmarkBlend);
@@ -121,6 +123,12 @@ export default function HandTracker() {
             }
         );
     }, [stabilizationMode, deadZone, jitterThreshold, predictionStrength, oneEuroMinCutoff, oneEuroBeta]);
+
+    const handleRetry = () => {
+        setCamError(null);
+        setReady(false);
+        setRetryKey(prev => prev + 1);
+    };
 
     useEffect(() => {
         let stream: MediaStream | null = null;
@@ -290,24 +298,14 @@ export default function HandTracker() {
                 stream.getTracks().forEach((t) => t.stop());
             }
         }
-    }, [setLandmarks, setVideoEl, setOrientation, setPalmScore]);
+    }, [setLandmarks, setVideoEl, setOrientation, setPalmScore, retryKey]);
 
     // Fallback UI if camera not accessible
     if (camError) {
-        const msg = camError === "denied" ? "Camera permission denied" :
-                    camError === "not-found" ? "No camera found" :
-                    camError === "unavailable" ? "Camera API unavailable" :
-                    camError === "init-failed" ? "Initialization failed" : "Camera error";
-        return (
-            <div style={{ position: "absolute", inset: 0, zIndex: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.75)', color: '#ddd', textAlign: 'center', gap: '1rem', padding: '1rem' }}>
-                <img src="/camera-error.png" alt="Camera error" style={{ maxWidth: '200px', opacity: 0.85 }} />
-                <div style={{ fontSize: '0.95rem', lineHeight: 1.4 }}>
-                    <strong>{msg}</strong><br/>
-                    {camError === 'denied' && 'Allow camera access in your browser settings and reload.'}
-                    {camError === 'not-found' && 'Connect a camera device and reload.'}
-                </div>
-            </div>
-        );
+        const errorType = camError === "denied" ? "denied" :
+                         camError === "not-found" ? "not-found" :
+                         camError === "unavailable" ? "unavailable" : "other";
+        return <CameraError errorType={errorType as "denied" | "not-found" | "unavailable" | "other"} onRetry={handleRetry} />;
     }
 
     return (
