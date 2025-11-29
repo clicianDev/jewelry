@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Environment, Loader, Preload, Stats } from "@react-three/drei";
 import { Suspense } from "react";
@@ -9,6 +9,7 @@ import { useHandStore } from "@/store/hands";
 import RingPresence from "@/components/three/RingPresense";
 import RingMenu, { type RingOption } from "@/components/ui/RingMenu";
 import InstructionsModal from "@/components/ui/InstructionsModal";
+import CaptureButton from "@/components/ui/CaptureButton";
 import classicRingUrl from "@/assets/ring.glb";
 import diamondRingUrl from "@/assets/diamond_ring.glb";
 import diamondRingImg from "@/assets/images/diamond_ring.png";
@@ -18,6 +19,7 @@ import "./App.css";
 export default function App() {
   const [showModal, setShowModal] = useState(false);
   const [trackingStarted, setTrackingStarted] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const landmarks = useHandStore((state) => state.landmarks);
   const videoEl = useHandStore((state) => state.videoEl);
   const showRing = !!(landmarks?.length && videoEl);
@@ -49,6 +51,69 @@ export default function App() {
     [ringOptions, selectedRingId]
   );
 
+  const handleCapture = () => {
+    if (!canvasRef.current || !videoEl) return;
+    
+    try {
+      // Create a temporary canvas to composite video + 3D ring
+      const compositeCanvas = document.createElement('canvas');
+      const ctx = compositeCanvas.getContext('2d');
+      if (!ctx) return;
+      
+      // Set canvas size to match the scene canvas
+      const sceneCanvas = canvasRef.current;
+      compositeCanvas.width = sceneCanvas.width;
+      compositeCanvas.height = sceneCanvas.height;
+      
+      // Calculate video scaling to maintain aspect ratio (cover mode)
+      const videoAspect = videoEl.videoWidth / videoEl.videoHeight;
+      const canvasAspect = compositeCanvas.width / compositeCanvas.height;
+      
+      let drawWidth, drawHeight, drawX, drawY;
+      
+      if (videoAspect > canvasAspect) {
+        // Video is wider - fit height and crop sides
+        drawHeight = compositeCanvas.height;
+        drawWidth = drawHeight * videoAspect;
+        drawX = (compositeCanvas.width - drawWidth) / 2;
+        drawY = 0;
+      } else {
+        // Video is taller - fit width and crop top/bottom
+        drawWidth = compositeCanvas.width;
+        drawHeight = drawWidth / videoAspect;
+        drawX = 0;
+        drawY = (compositeCanvas.height - drawHeight) / 2;
+      }
+      
+      // Draw video frame first (background) - mirrored horizontally like the live view
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.translate(-compositeCanvas.width, 0);
+      ctx.drawImage(videoEl, drawX, drawY, drawWidth, drawHeight);
+      ctx.restore();
+      
+      // Draw 3D ring canvas on top (foreground)
+      ctx.drawImage(sceneCanvas, 0, 0);
+      
+      // Convert composite canvas to blob and download
+      compositeCanvas.toBlob((blob) => {
+        if (!blob) return;
+        
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.download = `ring-fitment-${timestamp}.png`;
+        link.href = url;
+        link.click();
+        
+        // Clean up
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      }, 'image/png');
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error);
+    }
+  };
+
   return (
     <div className="app-shell">
       <section className="scene-panel" aria-label="Virtual ring preview">
@@ -66,6 +131,7 @@ export default function App() {
             <div className="scene-panel__canvas">
               <HandTracker />
               <Canvas
+                ref={canvasRef}
                 dpr={[1, 2]}
                 shadows={{ type: THREE.PCFSoftShadowMap }}
                 gl={{ antialias: true, preserveDrawingBuffer: true }}
@@ -93,6 +159,11 @@ export default function App() {
         </div>
         {/* Basic loading overlay with progress bar */}
         <Loader />
+        
+        {/* Capture Button - only show when tracking is active and ring is visible */}
+        {trackingStarted && showRing && (
+          <CaptureButton onCapture={handleCapture} />
+        )}
       </section>
       
       {/* Instructions Modal */}
