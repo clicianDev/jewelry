@@ -561,7 +561,7 @@ body {
   font-size: 0.95rem;
   font-weight: 600;
   color: #ffffff;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: black;
   border: none;
   border-radius: 12px;
   cursor: pointer;

@@ -4,6 +4,7 @@ import { useGLTF } from "@react-three/drei";
 import { useControls } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useHandStore } from "@/store/hands";
+import { createSparkleShaderMaterial, updateSparkleShaderTime } from "@/utils/sparkleShader";
 
 import ringUrl from "@/assets/diamond_ring.glb";
 import classicRingUrl from "@/assets/ring.glb";
@@ -250,6 +251,8 @@ export default function Ring({ modelUrl }: RingProps) {
   // Clipping plane provides clean geometry cutoff and works with shadows (clipShadows = true).
   const clipPlane = useRef<THREE.Plane | null>(null);
   const ringMaterials = useRef<THREE.Material[]>([]);
+  const sparkleMaterial = useRef<THREE.ShaderMaterial | null>(null);
+  const sparkleMesh = useRef<THREE.Mesh | null>(null);
 
   // Helper vector objects to avoid allocations
   const ndc = useRef(new THREE.Vector3());
@@ -343,6 +346,12 @@ export default function Ring({ modelUrl }: RingProps) {
     closureOffsetPositionZ: { label: "Close Adjust Pos", value: 1.5, min: 0, max: 10, step: 0.05 },
     closureScaleBoost: { label: "Close Scale Boost", value: 0.25, min: 0, max: 4, step: 0.01 },
   });
+  const { enableSparkles, sparkleIntensity, sparkleSize, sparkleSpeed } = useControls('Sparkle Effects', {
+    enableSparkles: { label: "Enable Sparkles", value: true },
+    sparkleIntensity: { label: "Intensity", value: 2.5, min: 0, max: 5, step: 0.1 },
+    sparkleSize: { label: "Size", value: 18.0, min: 5, max: 40, step: 1 },
+    sparkleSpeed: { label: "Speed", value: 0.6, min: 0, max: 2, step: 0.1 },
+  });
   // Independent base rotation controller (degrees for UX, converted to radians)
   // const { baseRotX, baseRotY, baseRotZ } = useControls('Ring Base Rotation', {
   //   baseRotX: { value: 1.6 * 57.2958, min: -180, max: 180, step: 0.1 }, // default existing 1.6 rad
@@ -355,6 +364,10 @@ export default function Ring({ modelUrl }: RingProps) {
   useEffect(() => {
   // Enable local clipping on renderer once
   gl.localClippingEnabled = true;
+  
+  // Enhanced shadow settings for better quality
+  gl.shadowMap.enabled = true;
+  gl.shadowMap.type = THREE.PCFSoftShadowMap;
 
     scene.traverse((obj) => {
       if ((obj as THREE.Mesh).isMesh) {
@@ -371,6 +384,8 @@ export default function Ring({ modelUrl }: RingProps) {
             mat.envMapIntensity ??= 0.5;
             mat.metalness = Math.max(0.9, mat.metalness ?? 1);
             mat.roughness = Math.max(0.05, mat.roughness ?? 0.05);
+            // Enhanced shadow settings for materials
+            mat.shadowSide = THREE.FrontSide;
           }
         }
       }
@@ -439,6 +454,18 @@ export default function Ring({ modelUrl }: RingProps) {
     // Initialize plane once along camera forward axis; normal will get updated per-frame
     if (!clipPlane.current) {
       clipPlane.current = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+    }
+    
+    // Initialize sparkle shader material
+    if (!sparkleMaterial.current) {
+      sparkleMaterial.current = createSparkleShaderMaterial({
+        sparkleIntensity: 2.5,
+        sparkleSize: 18.0,
+        sparkleSpeed: 0.6,
+        sparkleColor: new THREE.Color(0xffffff),
+        fresnelPower: 3.0,
+        metalness: 0.8,
+      });
     }
   }, [scene]);
 
@@ -881,6 +908,21 @@ export default function Ring({ modelUrl }: RingProps) {
 
       const safeScaleMultiplier = Math.max(0.01, closureScaleMultiplier);
       group.current.scale.setScalar(targetScale.current * safeScaleMultiplier);
+      
+      // Update sparkle shader
+      if (sparkleMaterial.current && enableSparkles) {
+        updateSparkleShaderTime(sparkleMaterial.current, logNow / 1000);
+        sparkleMaterial.current.uniforms.uSparkleIntensity.value = sparkleIntensity;
+        sparkleMaterial.current.uniforms.uSparkleSize.value = sparkleSize;
+        sparkleMaterial.current.uniforms.uSparkleSpeed.value = sparkleSpeed;
+      }
+      
+      // Update sparkle mesh visibility and scale
+      if (sparkleMesh.current) {
+        sparkleMesh.current.visible = enableSparkles;
+        sparkleMesh.current.scale.copy(group.current.scale);
+      }
+      
         if (!Number.isFinite(lastTransformLogTs.current) || logNow - lastTransformLogTs.current >= 1000) {
           const offsetRotationDeg = {
             x: rotationOffsetXDeg,
@@ -974,6 +1016,10 @@ export default function Ring({ modelUrl }: RingProps) {
     <group ref={group}>
       <group ref={userRotationGroup}>
         <primitive object={scene} />
+        {/* Sparkle overlay mesh */}
+        <mesh ref={sparkleMesh} material={sparkleMaterial.current || undefined}>
+          <sphereGeometry args={[1, 32, 32]} />
+        </mesh>
       </group>
     </group>
   );
