@@ -117,13 +117,13 @@ export class StabilizationFilter {
   private readonly VELOCITY_HISTORY_SIZE = 5; // Track last 5 frames for better prediction
 
   constructor(
-    deadZone = 0.0003,           // Smaller deadzone for faster response (was 0.0008)
-    velocitySmoothing = 0.15,    // Less smoothing for instant tracking (was 0.3)
-    jitterThreshold = 0.0015,    // Lower threshold for jitter detection (was 0.002)
-    predictionStrength = 0.35,   // Stronger prediction for motion compensation (was 0.15)
-    oneEuroMinCutoff = 3.0,      // Higher for instant response (was 1.5)
-    oneEuroBeta = 0.02,          // Higher for better velocity tracking (was 0.007)
-    oneEuroDCutoff = 2.0         // Higher derivative cutoff (was 1.0)
+    deadZone = 0.0002,           // Ultra-small deadzone for instant response
+    velocitySmoothing = 0.12,    // Minimal smoothing for instant tracking
+    jitterThreshold = 0.0012,    // Lower threshold for better jitter detection
+    predictionStrength = 0.42,   // Higher prediction for motion compensation
+    oneEuroMinCutoff = 3.5,      // Higher for even more instant response
+    oneEuroBeta = 0.025,         // Higher for better velocity tracking
+    oneEuroDCutoff = 2.2         // Higher derivative cutoff for smoother transitions
   ) {
     this.deadZone = deadZone;
     this.velocitySmoothing = velocitySmoothing;
@@ -339,22 +339,22 @@ export class LandmarkStabilizer {
   private initializeFilters() {
     const presets = {
       responsive: {
-        deadZone: 0.0002,           // Ultra-low deadzone for instant response
-        velocitySmoothing: 0.1,     // Minimal smoothing
-        jitterThreshold: 0.001,     // Lower jitter threshold
-        predictionStrength: 0.4,    // Strong prediction
-        oneEuroMinCutoff: 4.0,      // Very high for instant tracking
-        oneEuroBeta: 0.03,          // High velocity response
-        oneEuroDCutoff: 2.0,
+        deadZone: 0.00015,          // Ultra-low deadzone for instant response
+        velocitySmoothing: 0.08,    // Minimal smoothing
+        jitterThreshold: 0.0008,    // Lower jitter threshold
+        predictionStrength: 0.45,   // Strong prediction
+        oneEuroMinCutoff: 4.5,      // Very high for instant tracking
+        oneEuroBeta: 0.035,         // High velocity response
+        oneEuroDCutoff: 2.5,        // Higher for smoother derivative
       },
       balanced: {
-        deadZone: 0.0003,
-        velocitySmoothing: 0.15,
-        jitterThreshold: 0.0015,
-        predictionStrength: 0.35,
-        oneEuroMinCutoff: 3.0,
-        oneEuroBeta: 0.02,
-        oneEuroDCutoff: 2.0,
+        deadZone: 0.0002,
+        velocitySmoothing: 0.12,
+        jitterThreshold: 0.0012,
+        predictionStrength: 0.42,
+        oneEuroMinCutoff: 3.5,
+        oneEuroBeta: 0.025,
+        oneEuroDCutoff: 2.2,
       },
       stable: {
         deadZone: 0.0006,
@@ -447,5 +447,107 @@ export class EmaValue {
 
   setAlpha(alpha: number) {
     this.alpha = clamp(alpha, 0, 1);
+  }
+}
+
+/**
+ * Multi-frame temporal averaging for anchor points
+ * Reduces high-frequency jitter while maintaining low latency for larger movements
+ * Uses adaptive weighting based on motion magnitude
+ */
+export class TemporalAverager {
+  private history: Vec3[] = [];
+  private maxFrames: number;
+  private adaptiveWeight: boolean;
+  
+  constructor(maxFrames = 3, adaptiveWeight = true) {
+    this.maxFrames = Math.max(1, Math.min(maxFrames, 10));
+    this.adaptiveWeight = adaptiveWeight;
+  }
+
+  reset() {
+    this.history = [];
+  }
+
+  update(point: Vec3): Vec3 {
+    // Add new point to history
+    this.history.push({ ...point });
+    
+    // Limit history size
+    if (this.history.length > this.maxFrames) {
+      this.history.shift();
+    }
+    
+    // If we only have one frame, return it
+    if (this.history.length === 1) {
+      return { ...point };
+    }
+    
+    if (this.adaptiveWeight) {
+      // Calculate motion magnitude from most recent frames
+      let totalMotion = 0;
+      for (let i = 1; i < this.history.length; i++) {
+        const prev = this.history[i - 1];
+        const curr = this.history[i];
+        const dx = curr.x - prev.x;
+        const dy = curr.y - prev.y;
+        const dz = curr.z - prev.z;
+        totalMotion += Math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+      const avgMotion = totalMotion / (this.history.length - 1);
+      
+      // For fast motion, weight recent frames more heavily
+      // For slow motion, use more equal weighting to reduce jitter
+      const motionThreshold = 0.01;
+      const motionRatio = clamp(avgMotion / motionThreshold, 0, 1);
+      
+      // Calculate weighted average
+      let sumX = 0, sumY = 0, sumZ = 0, sumWeight = 0;
+      
+      for (let i = 0; i < this.history.length; i++) {
+        // Recent frames get higher weight when moving fast
+        const recencyFactor = (i + 1) / this.history.length; // 0 to 1
+        const baseWeight = 1;
+        const weight = lerp(baseWeight, baseWeight * recencyFactor * 2, motionRatio);
+        
+        sumX += this.history[i].x * weight;
+        sumY += this.history[i].y * weight;
+        sumZ += this.history[i].z * weight;
+        sumWeight += weight;
+      }
+      
+      return {
+        x: sumX / sumWeight,
+        y: sumY / sumWeight,
+        z: sumZ / sumWeight,
+      };
+    } else {
+      // Simple equal-weighted average
+      let sumX = 0, sumY = 0, sumZ = 0;
+      for (const p of this.history) {
+        sumX += p.x;
+        sumY += p.y;
+        sumZ += p.z;
+      }
+      const count = this.history.length;
+      return {
+        x: sumX / count,
+        y: sumY / count,
+        z: sumZ / count,
+      };
+    }
+  }
+
+  configure(maxFrames?: number, adaptiveWeight?: boolean) {
+    if (maxFrames !== undefined) {
+      this.maxFrames = Math.max(1, Math.min(maxFrames, 10));
+      // Trim history if needed
+      while (this.history.length > this.maxFrames) {
+        this.history.shift();
+      }
+    }
+    if (adaptiveWeight !== undefined) {
+      this.adaptiveWeight = adaptiveWeight;
+    }
   }
 }
