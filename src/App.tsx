@@ -10,6 +10,7 @@ import RingPresence from "@/components/three/RingPresense";
 import RingMenu, { type RingOption } from "@/components/ui/RingMenu";
 import InstructionsModal from "@/components/ui/InstructionsModal";
 import CaptureButton from "@/components/ui/CaptureButton";
+import FingerSelector from "@/components/ui/FingerSelector";
 import classicRingUrl from "@/assets/ring.glb";
 import diamondRingUrl from "@/assets/diamond_ring.glb";
 import diamondRingImg from "@/assets/images/diamond_ring.png";
@@ -154,6 +155,8 @@ export default function App() {
                 {/* R3F default stats panel(FPS) */}
                 <Stats />
               </Canvas>
+              {/* Finger selector button - only show when ring is visible */}
+              {showRing && <FingerSelector />}
             </div>
           )}
         </div>

@@ -593,3 +593,37 @@ body {
 .capture-button span {
   white-space: nowrap;
 }
+
+/* Finger Selector Button Styles */
+.finger-selector-button {
+  position: absolute;
+  bottom: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: #ffffff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.finger-selector-button:hover {
+  transform: translateX(-50%) scale(1.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.finger-selector-button:active {
+  transform: translateX(-50%) scale(0.95);
+}
+
+.finger-selector-image {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}

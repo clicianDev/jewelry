@@ -6,6 +6,16 @@ export type Landmark = {
     z: number;
 };
 
+// Finger landmark index pairs for ring positioning
+// Each pair represents [MCP, PIP] joint indices for each finger
+export const FINGER_POSITIONS = [
+    { indices: [13, 14], label: 'Ring' },    // Ring finger (default)
+    { indices: [9, 10], label: 'Middle' },   // Middle finger
+    { indices: [5, 6], label: 'Index' },     // Index finger
+    { indices: [2, 3], label: 'Thumb' },     // Thumb
+    { indices: [17, 18], label: 'Pinky' },   // Pinky finger
+] as const;
+
 type HandState = {
     // Landmarks for the first detected hand (21 points) in normalized image coordinates [0,1]
     landmarks: Landmark[] | null;
@@ -23,6 +33,8 @@ type HandState = {
     orientation: 'palm' | 'back' | null;
     // Continuous orientation score (>0 palm toward camera, <0 back toward camera)
     palmScore: number | null;
+    // Current finger position index (0-4, cycles through FINGER_POSITIONS)
+    fingerPositionIndex: number;
     // The live webcam video element for reuse (env background, etc.)
     videoEl: HTMLVideoElement | null;
     setLandmarks: (
@@ -35,6 +47,7 @@ type HandState = {
     setVideoEl: (el: HTMLVideoElement | null) => void;
     setOrientation: (orientation: 'palm' | 'back' | null) => void;
     setPalmScore: (score: number | null) => void;
+    cycleFingerPosition: () => void;
 }
 
 export const useHandStore = create<HandState>((set) => ({
@@ -46,6 +59,7 @@ export const useHandStore = create<HandState>((set) => ({
     handedness: null,
     orientation: null,
     palmScore: null,
+    fingerPositionIndex: 0,
     videoEl: null,
     setLandmarks: (landmarks, handedness = null, raw = landmarks, timestampMs = typeof performance !== "undefined" ? performance.now() : Date.now()) =>
         set((state) => {
@@ -107,4 +121,7 @@ export const useHandStore = create<HandState>((set) => ({
     setVideoEl: (videoEl) => set({ videoEl }),
     setOrientation: (orientation) => set({ orientation }),
     setPalmScore: (palmScore) => set({ palmScore }),
+    cycleFingerPosition: () => set((state) => ({
+        fingerPositionIndex: (state.fingerPositionIndex + 1) % FINGER_POSITIONS.length
+    })),
 }));

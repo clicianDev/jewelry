@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 import { useGLTF } from "@react-three/drei";
 import { useControls } from "leva";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useHandStore } from "@/store/hands";
+import { useHandStore, FINGER_POSITIONS } from "@/store/hands";
 import { createSparkleShaderMaterial, updateSparkleShaderTime } from "@/utils/sparkleShader";
 import { TemporalAverager } from "@/utils/stabilization";
 
@@ -233,6 +233,10 @@ export default function Ring({ modelUrl }: RingProps) {
   const orientation = useHandStore((state) => state.orientation);
   const palmScore = useHandStore((state) => state.palmScore);
   const handedness = useHandStore((state) => state.handedness);
+  const fingerPositionIndex = useHandStore((state) => state.fingerPositionIndex);
+
+  // Get dynamic finger indices based on selected finger position
+  const [fingerIdx1, fingerIdx2] = FINGER_POSITIONS[fingerPositionIndex].indices;
 
   //  orientation === 'back' : back of hand faces camera -> user sees ring head (stone). We keep head, hide shank.
   //  orientation === 'palm' : palm faces camera -> user would see underside; show shank instead (hide head) for clarity.
@@ -474,9 +478,9 @@ export default function Ring({ modelUrl }: RingProps) {
   useFrame((_, delta) => {
     const lms = landmarksRaw ?? landmarksBlended;
     if (lms && lms.length >= 21 && group.current) {
-      const p13 = lms[13];
-      const p14 = lms[14];
-      if (!p13 || !p14) {
+      const pBase = lms[fingerIdx1];
+      const pNext = lms[fingerIdx2];
+      if (!pBase || !pNext) {
         return;
       }
 
@@ -488,15 +492,15 @@ export default function Ring({ modelUrl }: RingProps) {
       const lookaheadMs = Math.max(0, motionLookaheadMs ?? 0) + dataAgeMs;
       const lookaheadSeconds = Math.min(0.25, lookaheadMs / 1000);
 
-      // Weighted midpoint between ring finger MCP (13) and PIP (14) with bias toward 13 (base of finger)
+      // Weighted midpoint between finger base (MCP) and next joint (PIP) with bias toward base
       const bias13 = THREE.MathUtils.lerp(DEFAULT_BIAS_TOWARD_13, 0, anchorToward14);
-      const rawAnchor = calculateAnchorPoint(p13, p14, bias13, alongFinger);
+      const rawAnchor = calculateAnchorPoint(pBase, pNext, bias13, alongFinger);
       
       // Apply temporal averaging to reduce high-frequency jitter
       const temporallyAveragedAnchor = temporalAverager.current.update({
         x: rawAnchor.x,
         y: rawAnchor.y,
-        z: p13.z, // Include depth for complete 3D averaging
+        z: pBase.z, // Include depth for complete 3D averaging
       });
       
       let rawAnchorX = temporallyAveragedAnchor.x;
@@ -531,10 +535,10 @@ export default function Ring({ modelUrl }: RingProps) {
       let anchorY = rawAnchorY;
 
       if (jitterBlend > 0 && landmarksStabilized && landmarksStabilized.length >= 21) {
-        const s13 = landmarksStabilized[13];
-        const s14 = landmarksStabilized[14];
-        if (s13 && s14) {
-          const stableAnchor = calculateAnchorPoint(s13, s14, bias13, alongFinger);
+        const sBase = landmarksStabilized[fingerIdx1];
+        const sNext = landmarksStabilized[fingerIdx2];
+        if (sBase && sNext) {
+          const stableAnchor = calculateAnchorPoint(sBase, sNext, bias13, alongFinger);
 
           const velocityCut = Math.max(0.0005, jitterVelocityCutoff);
           const velocityRatio = THREE.MathUtils.clamp(rawDelta / velocityCut, 0, 1);
@@ -612,7 +616,7 @@ export default function Ring({ modelUrl }: RingProps) {
       dir.current.copy(ndc.current).sub(camera.position).normalize();
 
       // Approximate depth using MediaPipe z so the ring stays glued when the hand leans
-      const depthOffset = THREE.MathUtils.clamp(p13.z, -0.6, 0.6) * DEPTH_RANGE;
+      const depthOffset = THREE.MathUtils.clamp(pBase.z, -0.6, 0.6) * DEPTH_RANGE;
       const targetDistance = BASE_DISTANCE + depthOffset;
   const depthAlpha = computeAlpha(DEPTH_RESPONSE, 0.06, smoothingAttenuation); // Lower base strength for faster response
       smoothedDistance.current = THREE.MathUtils.lerp(
@@ -669,8 +673,8 @@ export default function Ring({ modelUrl }: RingProps) {
       group.current.position.copy(smoothedPosition.current);
 
       // --- Finger Diameter Estimation (Normalized Screen Space) ---
-      const dxSeg = p13.x - p14.x;
-      const dySeg = p13.y - p14.y;
+      const dxSeg = pBase.x - pNext.x;
+      const dySeg = pBase.y - pNext.y;
       const segmentLenNorm = Math.sqrt(dxSeg * dxSeg + dySeg * dySeg);
       const rawDiameterNorm = segmentLenNorm * FINGER_DIAMETER_TO_SEGMENT_RATIO;
       let widthAlpha = computeAlpha(WIDTH_RESPONSE, 0.04, smoothingAttenuation); // Lower base strength for instant sizing
@@ -745,11 +749,11 @@ export default function Ring({ modelUrl }: RingProps) {
       }
 
       group.current.lookAt(camera.position);
-      const x13s = 1 - p13.x;
-      const y13s = p13.y;
-      const x14s = 1 - p14.x;
-      const y14s = p14.y;
-      const segAngle = Math.atan2(y14s - y13s, x14s - x13s);
+      const xBase = 1 - pBase.x;
+      const yBase = pBase.y;
+      const xNext = 1 - pNext.x;
+      const yNext = pNext.y;
+      const segAngle = Math.atan2(yNext - yBase, xNext - xBase);
       const targetAngle = -segAngle + 0.5;
       const curr = viewAxisAngle.current;
       const diff = ((targetAngle - curr + Math.PI) % (2 * Math.PI)) - Math.PI;
