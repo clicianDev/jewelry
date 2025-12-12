@@ -40,9 +40,9 @@ class OneEuroFilter {
   private dCutoff: number;
   
   constructor(
-    minCutoff = 3.0,    // Higher = more responsive (was 1.0, now 3.0)
-    beta = 0.02,        // Higher = better velocity response (was 0.007, now 0.02)
-    dCutoff = 2.0       // Higher derivative cutoff for better motion tracking
+    minCutoff = 8.0,    // Much higher = near-instant response (was 3.0)
+    beta = 0.05,        // Higher = aggressive velocity response (was 0.02)
+    dCutoff = 3.0       // Higher derivative cutoff for better motion tracking
   ) {
     this.minCutoff = minCutoff;
     this.beta = beta;
@@ -114,16 +114,16 @@ export class StabilizationFilter {
   private velocitySmoothing: number;
   private jitterThreshold: number;
   private predictionStrength: number;
-  private readonly VELOCITY_HISTORY_SIZE = 5; // Track last 5 frames for better prediction
+  private readonly VELOCITY_HISTORY_SIZE = 3; // Reduced for faster response
 
   constructor(
-    deadZone = 0.0002,           // Ultra-small deadzone for instant response
-    velocitySmoothing = 0.12,    // Minimal smoothing for instant tracking
-    jitterThreshold = 0.0012,    // Lower threshold for better jitter detection
-    predictionStrength = 0.42,   // Higher prediction for motion compensation
-    oneEuroMinCutoff = 3.5,      // Higher for even more instant response
-    oneEuroBeta = 0.025,         // Higher for better velocity tracking
-    oneEuroDCutoff = 2.2         // Higher derivative cutoff for smoother transitions
+    deadZone = 0.00002,           // Near-zero deadzone for instant tracking
+    velocitySmoothing = 0.02,     // Minimal smoothing for instant tracking
+    jitterThreshold = 0.0003,     // Ultra-low threshold for maximum responsiveness
+    predictionStrength = 0.6,     // Higher prediction for motion compensation
+    oneEuroMinCutoff = 10.0,      // Very high for near-instant response
+    oneEuroBeta = 0.06,           // Aggressive velocity tracking
+    oneEuroDCutoff = 3.0          // High derivative cutoff for smooth transitions
   ) {
     this.deadZone = deadZone;
     this.velocitySmoothing = velocitySmoothing;
@@ -308,7 +308,7 @@ export class StabilizationFilter {
  */
 export class LandmarkStabilizer {
   private filters: StabilizationFilter[] = [];
-  private mode: 'responsive' | 'balanced' | 'stable';
+  private mode: 'instant' | 'responsive' | 'balanced' | 'stable';
   private customParams?: {
     deadZone?: number;
     velocitySmoothing?: number;
@@ -320,7 +320,7 @@ export class LandmarkStabilizer {
   };
 
   constructor(
-    mode: 'responsive' | 'balanced' | 'stable' = 'balanced',
+    mode: 'instant' | 'responsive' | 'balanced' | 'stable' = 'instant',
     customParams?: {
       deadZone?: number;
       velocitySmoothing?: number;
@@ -338,22 +338,31 @@ export class LandmarkStabilizer {
 
   private initializeFilters() {
     const presets = {
+      instant: {
+        deadZone: 0.00002,          // Near-zero deadzone for instant tracking
+        velocitySmoothing: 0.02,    // Minimal velocity smoothing
+        jitterThreshold: 0.0003,    // Ultra-low jitter threshold
+        predictionStrength: 0.6,    // Strong prediction for latency compensation
+        oneEuroMinCutoff: 10.0,     // Very high for near-instant response
+        oneEuroBeta: 0.06,          // Aggressive velocity response
+        oneEuroDCutoff: 3.0,        // High derivative cutoff
+      },
       responsive: {
-        deadZone: 0.00015,          // Ultra-low deadzone for instant response
-        velocitySmoothing: 0.08,    // Minimal smoothing
-        jitterThreshold: 0.0008,    // Lower jitter threshold
-        predictionStrength: 0.45,   // Strong prediction
-        oneEuroMinCutoff: 4.5,      // Very high for instant tracking
-        oneEuroBeta: 0.035,         // High velocity response
-        oneEuroDCutoff: 2.5,        // Higher for smoother derivative
+        deadZone: 0.00008,          // Ultra-low deadzone for instant response
+        velocitySmoothing: 0.05,    // Minimal smoothing
+        jitterThreshold: 0.0005,    // Lower jitter threshold
+        predictionStrength: 0.5,    // Strong prediction
+        oneEuroMinCutoff: 7.0,      // Very high for instant tracking
+        oneEuroBeta: 0.045,         // High velocity response
+        oneEuroDCutoff: 2.8,        // Higher for smoother derivative
       },
       balanced: {
-        deadZone: 0.0002,
-        velocitySmoothing: 0.12,
-        jitterThreshold: 0.0012,
-        predictionStrength: 0.42,
-        oneEuroMinCutoff: 3.5,
-        oneEuroBeta: 0.025,
+        deadZone: 0.00015,
+        velocitySmoothing: 0.1,
+        jitterThreshold: 0.001,
+        predictionStrength: 0.4,
+        oneEuroMinCutoff: 5.0,
+        oneEuroBeta: 0.03,
         oneEuroDCutoff: 2.2,
       },
       stable: {
@@ -395,7 +404,7 @@ export class LandmarkStabilizer {
   }
 
   configure(
-    mode?: 'responsive' | 'balanced' | 'stable',
+    mode?: 'instant' | 'responsive' | 'balanced' | 'stable',
     customParams?: {
       deadZone?: number;
       velocitySmoothing?: number;

@@ -7,9 +7,9 @@ import HandOverlay from "@/components/ui/HandOverlay";
 import CameraError from "@/components/ui/CameraError";
 import { EmaValue, LandmarkStabilizer } from "@/utils/stabilization";
 
-type StabilizationMode = 'responsive' | 'balanced' | 'stable';
-const STABILIZATION_MODE_OPTIONS: StabilizationMode[] = ['responsive', 'balanced', 'stable'];
-const DEFAULT_STABILIZATION_MODE: StabilizationMode = 'responsive';
+type StabilizationMode = 'instant' | 'responsive' | 'balanced' | 'stable';
+const STABILIZATION_MODE_OPTIONS: StabilizationMode[] = ['instant', 'responsive', 'balanced', 'stable'];
+const DEFAULT_STABILIZATION_MODE: StabilizationMode = 'instant';
 
 
 
@@ -38,7 +38,7 @@ export default function HandTracker() {
     const landmarkStabilizerRef = useRef(
         new LandmarkStabilizer(DEFAULT_STABILIZATION_MODE)
     );
-    const palmScoreEmaRef = useRef(new EmaValue(0.8)); // Increased from 0.6 for smoother orientation transitions
+    const palmScoreEmaRef = useRef(new EmaValue(0.4)); // Lower for faster orientation response
 
     const trackingControls = useControls(
         "Tracking",
@@ -58,38 +58,38 @@ export default function HandTracker() {
             },
             deadZone: {
                 label: "Dead Zone (jitter filter)",
-                value: 0.0002,  // Lower default for more responsiveness (was 0)
+                value: 0.00005,  // Ultra-low for instant tracking
                 min: 0,
-                max: 0.003,
-                step: 0.0001,
+                max: 0.001,
+                step: 0.00001,
             },
             jitterThreshold: {
                 label: "Jitter Threshold",
-                value: 0.0015,  // Lower default (was 0.005)
-                min: 0.0005,
-                max: 0.005,
+                value: 0.0004,  // Very low for maximum responsiveness
+                min: 0.0001,
+                max: 0.002,
                 step: 0.0001,
             },
             predictionStrength: {
                 label: "Prediction Strength",
-                value: 0.4,  // Higher default for better motion compensation (was 0.5)
+                value: 0.55,  // Higher prediction for motion compensation
                 min: 0,
-                max: 0.5,
+                max: 0.8,
                 step: 0.05,
             },
             oneEuroMinCutoff: {
                 label: "One Euro Min Cutoff",
-                value: 4.0,  // Higher default for instant response (was 5)
-                min: 0.5,
-                max: 5,
-                step: 0.1,
+                value: 8.0,  // Very high for near-instant response
+                min: 1,
+                max: 15,
+                step: 0.5,
             },
             oneEuroBeta: {
                 label: "One Euro Beta",
-                value: 0.03,  // Higher default for better velocity tracking (was 0.02)
-                min: 0.001,
-                max: 0.05,
-                step: 0.001,
+                value: 0.05,  // Higher for aggressive velocity tracking
+                min: 0.01,
+                max: 0.1,
+                step: 0.005,
             },
         }),
         [landmarkBlend]
@@ -245,8 +245,8 @@ export default function HandTracker() {
                         const orientation = detectHandOrientation(raw, lastOrientationRef.current, handed);
                         if (orientation && orientation !== lastOrientationRef.current) {
                             const now = performance.now();
-                            // Longer debounce window to prevent jitter during rotation (was 250ms)
-                            if (now - lastOrientationLogTs.current > 500) {
+                            // Short debounce window for fast response (was 500ms)
+                            if (now - lastOrientationLogTs.current > 150) {
                                 lastOrientationRef.current = orientation;
                                 lastOrientationLogTs.current = now;
                                 setOrientation(orientation as 'palm' | 'back');
@@ -410,10 +410,10 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
         palmScore = -palmScore;
     }
 
-    // Hysteresis to avoid flicker: require stronger evidence to switch states
-    // Increased thresholds to prevent jittering during rotation
-    const PALM_THRESHOLD = 0.6; // enter palm if score > this (was 0.4)
-    const BACK_THRESHOLD = -0.6; // enter back if score < this (was -0.4)
+    // Hysteresis to avoid flicker: require evidence to switch states
+    // Lower thresholds for faster response
+    const PALM_THRESHOLD = 0.35; // enter palm if score > this (was 0.6)
+    const BACK_THRESHOLD = -0.35; // enter back if score < this (was -0.6)
     
     let result: 'palm' | 'back';
     
