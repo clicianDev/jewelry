@@ -234,6 +234,7 @@ export default function Ring({ modelUrl }: RingProps) {
   const palmScore = useHandStore((state) => state.palmScore);
   const handedness = useHandStore((state) => state.handedness);
   const fingerPositionIndex = useHandStore((state) => state.fingerPositionIndex);
+  const setIsHandTooClose = useHandStore((state) => state.setIsHandTooClose);
 
   // Get dynamic finger indices based on selected finger position
   const [fingerIdx1, fingerIdx2] = FINGER_POSITIONS[fingerPositionIndex].indices;
@@ -307,7 +308,7 @@ export default function Ring({ modelUrl }: RingProps) {
   // Depth-driven scale range ensures ring grows as hand approaches camera.
   const DEPTH_SCALE_NEAR_DISTANCE = Math.max(5, BASE_DISTANCE - DEPTH_RANGE * 0.45);
   const DEPTH_SCALE_FAR_DISTANCE = BASE_DISTANCE + DEPTH_RANGE * 0.55;
-  const DEPTH_SCALE_NEAR = 1.35;
+  const DEPTH_SCALE_NEAR = 1.20;
   const DEPTH_SCALE_FAR = 0.75;
   const smoothedDistance = useRef(BASE_DISTANCE);
   const CLOSURE_RESPONSE = 120; // faster hand closure response (was 70)
@@ -729,8 +730,11 @@ export default function Ring({ modelUrl }: RingProps) {
         const horizontalness = THREE.MathUtils.clamp(1 - palmScoreAbs, 0, 1); // 1 = horizontal, 0 = vertical
         const dynamicFitAdjust = THREE.MathUtils.lerp(2.0, 2.50, horizontalness);
         
+        // Reduce scale slightly for right hand
+        const handednessScale = handedness?.toLowerCase() === "right" ? 0.85 : 1.0;
+        
         const fitScale = THREE.MathUtils.clamp(
-          fitScaleRaw * dynamicFitAdjust,
+          fitScaleRaw * dynamicFitAdjust * handednessScale,
           SCALE_MIN,
           SCALE_MAX
         );
@@ -919,6 +923,11 @@ export default function Ring({ modelUrl }: RingProps) {
         );
 
         const logNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+
+      // Hide ring when hand is too close to camera
+      const isTooClose = smoothedDistance.current < 15;
+      group.current.visible = !isTooClose;
+      setIsHandTooClose(isTooClose);
 
       const safeScaleMultiplier = Math.max(0.01, closureScaleMultiplier);
       group.current.scale.setScalar(targetScale.current * safeScaleMultiplier);

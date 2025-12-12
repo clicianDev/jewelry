@@ -11,6 +11,7 @@ import RingMenu, { type RingOption } from "@/components/ui/RingMenu";
 import InstructionsModal from "@/components/ui/InstructionsModal";
 import CaptureButton from "@/components/ui/CaptureButton";
 import FingerSelector from "@/components/ui/FingerSelector";
+import HandTooCloseOverlay from "@/components/ui/HandTooCloseOverlay";
 import classicRingUrl from "@/assets/ring.glb";
 import diamondRingUrl from "@/assets/diamond_ring.glb";
 import diamondRingImg from "@/assets/images/diamond_ring.png";
@@ -131,6 +132,7 @@ export default function App() {
           ) : (
             <div className="scene-panel__canvas">
               <HandTracker />
+              <HandTooCloseOverlay />
               <Canvas
                 ref={canvasRef}
                 dpr={[1, 2]}

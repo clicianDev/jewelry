@@ -35,6 +35,8 @@ type HandState = {
     palmScore: number | null;
     // Current finger position index (0-4, cycles through FINGER_POSITIONS)
     fingerPositionIndex: number;
+    // Whether the hand is too close to the camera
+    isHandTooClose: boolean;
     // The live webcam video element for reuse (env background, etc.)
     videoEl: HTMLVideoElement | null;
     setLandmarks: (
@@ -48,6 +50,7 @@ type HandState = {
     setOrientation: (orientation: 'palm' | 'back' | null) => void;
     setPalmScore: (score: number | null) => void;
     cycleFingerPosition: () => void;
+    setIsHandTooClose: (isClose: boolean) => void;
 }
 
 export const useHandStore = create<HandState>((set) => ({
@@ -60,6 +63,7 @@ export const useHandStore = create<HandState>((set) => ({
     orientation: null,
     palmScore: null,
     fingerPositionIndex: 0,
+    isHandTooClose: false,
     videoEl: null,
     setLandmarks: (landmarks, handedness = null, raw = landmarks, timestampMs = typeof performance !== "undefined" ? performance.now() : Date.now()) =>
         set((state) => {
@@ -124,4 +128,5 @@ export const useHandStore = create<HandState>((set) => ({
     cycleFingerPosition: () => set((state) => ({
         fingerPositionIndex: (state.fingerPositionIndex + 1) % FINGER_POSITIONS.length
     })),
+    setIsHandTooClose: (isHandTooClose) => set({ isHandTooClose }),
 }));
