@@ -6,6 +6,16 @@ export type Landmark = {
     z: number;
 };
 
+// Detect if device is mobile (touch device without hover)
+const isMobileDevice = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    return (
+        'ontouchstart' in window ||
+        navigator.maxTouchPoints > 0 ||
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+    );
+};
+
 // Finger landmark index pairs for ring positioning
 // Each pair represents [MCP, PIP] joint indices for each finger
 export const FINGER_POSITIONS = [
@@ -39,6 +49,8 @@ type HandState = {
     isHandTooClose: boolean;
     // The live webcam video element for reuse (env background, etc.)
     videoEl: HTMLVideoElement | null;
+    // Camera facing mode: 'user' (front) or 'environment' (back)
+    facingMode: 'user' | 'environment';
     setLandmarks: (
         landmarks: Landmark[] | null,
         handedness?: string | null,
@@ -51,6 +63,8 @@ type HandState = {
     setPalmScore: (score: number | null) => void;
     cycleFingerPosition: () => void;
     setIsHandTooClose: (isClose: boolean) => void;
+    setFacingMode: (mode: 'user' | 'environment') => void;
+    toggleFacingMode: () => void;
 }
 
 export const useHandStore = create<HandState>((set) => ({
@@ -65,6 +79,7 @@ export const useHandStore = create<HandState>((set) => ({
     fingerPositionIndex: 0,
     isHandTooClose: false,
     videoEl: null,
+    facingMode: isMobileDevice() ? 'environment' : 'user', // Back camera on mobile, front on desktop
     setLandmarks: (landmarks, handedness = null, raw = landmarks, timestampMs = typeof performance !== "undefined" ? performance.now() : Date.now()) =>
         set((state) => {
             const stabilized = landmarks ?? null;
@@ -129,4 +144,8 @@ export const useHandStore = create<HandState>((set) => ({
         fingerPositionIndex: (state.fingerPositionIndex + 1) % FINGER_POSITIONS.length
     })),
     setIsHandTooClose: (isHandTooClose) => set({ isHandTooClose }),
+    setFacingMode: (facingMode) => set({ facingMode }),
+    toggleFacingMode: () => set((state) => ({
+        facingMode: state.facingMode === 'user' ? 'environment' : 'user'
+    })),
 }));

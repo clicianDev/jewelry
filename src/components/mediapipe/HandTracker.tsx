@@ -26,6 +26,7 @@ export default function HandTracker() {
     const setOrientation = useHandStore((state) => state.setOrientation);
     const setVideoEl = useHandStore((state) => state.setVideoEl);
     const setPalmScore = useHandStore((state) => state.setPalmScore);
+    const facingMode = useHandStore((state) => state.facingMode);
     const landmarkerRef = useRef<HandLandmarker | null>(null);
     const animationRef = useRef<number | null>(null);
     const lastFrameTimeRef = useRef<number | null>(null);
@@ -160,9 +161,9 @@ export default function HandTracker() {
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: {
-                            facingMode: "user",
-                            width: { ideal: 640 },
-                            height: { ideal: 480 },
+                            facingMode: facingMode, // Use facingMode from store
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 },
                             frameRate: { ideal: 60, max: 60 },
                         },
                         audio: false,
@@ -212,11 +213,13 @@ export default function HandTracker() {
                         if(ctx) {
                             const w = canvasRef.current.width;
                             const h = canvasRef.current.height;
-                            // Mirror for user-facing camera feel
                             ctx.save();
                             ctx.clearRect(0, 0, w, h);
-                            ctx.scale(-1, 1);
-                            ctx.translate(-w, 0); // Flip horizontally 
+                            // Only mirror for front-facing camera
+                            if (facingMode === 'user') {
+                                ctx.scale(-1, 1);
+                                ctx.translate(-w, 0);
+                            }
                             ctx.drawImage(videoRef.current, 0, 0, w, h);
                             ctx.restore();
 
@@ -298,7 +301,7 @@ export default function HandTracker() {
                 stream.getTracks().forEach((t) => t.stop());
             }
         }
-    }, [setLandmarks, setVideoEl, setOrientation, setPalmScore, retryKey]);
+    }, [setLandmarks, setVideoEl, setOrientation, setPalmScore, retryKey, facingMode]);
 
     // Fallback UI if camera not accessible
     if (camError) {

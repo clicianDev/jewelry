@@ -10,6 +10,7 @@ import RingPresence from "@/components/three/RingPresense";
 import RingMenu, { type RingOption } from "@/components/ui/RingMenu";
 import InstructionsModal from "@/components/ui/InstructionsModal";
 import CaptureButton from "@/components/ui/CaptureButton";
+import CameraSwitchButton from "@/components/ui/CameraSwitchButton";
 import FingerSelector from "@/components/ui/FingerSelector";
 import HandTooCloseOverlay from "@/components/ui/HandTooCloseOverlay";
 import classicRingUrl from "@/assets/ring.glb";
@@ -132,6 +133,7 @@ export default function App() {
           ) : (
             <div className="scene-panel__canvas">
               <HandTracker />
+              <CameraSwitchButton />
               <HandTooCloseOverlay />
               <Canvas
                 ref={canvasRef}

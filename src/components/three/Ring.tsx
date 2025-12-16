@@ -613,7 +613,9 @@ export default function Ring({ modelUrl }: RingProps) {
         adjustedY = THREE.MathUtils.clamp(adjustedY, 0, 1);
       }
 
-      const mirroredX = 1 - adjustedX; // account for mirrored video
+      // Only mirror X for front-facing camera
+      const currentFacingMode = useHandStore.getState().facingMode;
+      const mirroredX = currentFacingMode === 'user' ? 1 - adjustedX : adjustedX;
       ndc.current.set(mirroredX * 2 - 1, -(adjustedY * 2 - 1), 0.5);
       // Unproject from NDC to world: create a ray from camera through ndc
       ndc.current.unproject(camera);
