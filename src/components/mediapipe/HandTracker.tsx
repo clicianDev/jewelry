@@ -408,20 +408,20 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
 
     // ring.set.rotation.x.setScore( current rotation + or - palmScore * factor )
 
-    // If the detected hand is the Left hand and using front camera (mirrored view),
-    // invert score because the mirrored camera view flips facing logic.
-    // For back camera (not mirrored), the inversion should be different.
+    // Adjust palm score based on camera mode and handedness:
+    // - Front camera (mirrored): The view is flipped horizontally, so left hand appears as right
+    // - Back camera (not mirrored): We're viewing the hand from behind, so palm/back is inverted
     const currentFacingMode = useHandStore.getState().facingMode;
+    
     if (currentFacingMode === 'user') {
-        // Front camera is mirrored - left hand appears as right in video
+        // Front camera is mirrored - left hand needs score inversion
         if (handedness === 'Left') {
             palmScore = -palmScore;
         }
     } else {
-        // Back camera is not mirrored - right hand in view is actually right hand
-        if (handedness === 'Right') {
-            palmScore = -palmScore;
-        }
+        // Back camera: viewing hand from behind inverts the palm/back perception
+        // When you point back camera at your own hand, what looks like "palm" is actually "back"
+        palmScore = -palmScore;
     }
 
     // Hysteresis to avoid flicker: require evidence to switch states
@@ -494,14 +494,15 @@ function computePalmScore(lms: Landmark[] | undefined, handedness?: string | nul
     // Normalize with tanh to keep in [-1, 1]
     score = Math.tanh(score);
 
-    // Adjust score based on handedness and camera mode
+    // Adjust score based on camera mode and handedness
     const currentFacingMode = useHandStore.getState().facingMode;
+    
     if (currentFacingMode === 'user') {
-        // Front camera is mirrored
+        // Front camera is mirrored - left hand needs score inversion
         if (handedness === 'Left') score = -score;
     } else {
-        // Back camera is not mirrored
-        if (handedness === 'Right') score = -score;
+        // Back camera: viewing hand from behind inverts palm/back perception
+        score = -score;
     }
     return score;
 }
