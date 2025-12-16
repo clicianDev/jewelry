@@ -408,9 +408,20 @@ function detectHandOrientation(lms: Landmark[] | undefined, prev: string | null,
 
     // ring.set.rotation.x.setScore( current rotation + or - palmScore * factor )
 
-    // If the detected hand is the Left hand, invert score because the mirrored camera view flips facing logic.
-    if (handedness === 'Left') {
-        palmScore = -palmScore;
+    // If the detected hand is the Left hand and using front camera (mirrored view),
+    // invert score because the mirrored camera view flips facing logic.
+    // For back camera (not mirrored), the inversion should be different.
+    const currentFacingMode = useHandStore.getState().facingMode;
+    if (currentFacingMode === 'user') {
+        // Front camera is mirrored - left hand appears as right in video
+        if (handedness === 'Left') {
+            palmScore = -palmScore;
+        }
+    } else {
+        // Back camera is not mirrored - right hand in view is actually right hand
+        if (handedness === 'Right') {
+            palmScore = -palmScore;
+        }
     }
 
     // Hysteresis to avoid flicker: require evidence to switch states
@@ -483,6 +494,14 @@ function computePalmScore(lms: Landmark[] | undefined, handedness?: string | nul
     // Normalize with tanh to keep in [-1, 1]
     score = Math.tanh(score);
 
-    if (handedness === 'Left') score = -score;
+    // Adjust score based on handedness and camera mode
+    const currentFacingMode = useHandStore.getState().facingMode;
+    if (currentFacingMode === 'user') {
+        // Front camera is mirrored
+        if (handedness === 'Left') score = -score;
+    } else {
+        // Back camera is not mirrored
+        if (handedness === 'Right') score = -score;
+    }
     return score;
 }

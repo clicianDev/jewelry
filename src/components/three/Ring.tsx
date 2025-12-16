@@ -735,8 +735,11 @@ export default function Ring({ modelUrl }: RingProps) {
         const horizontalness = THREE.MathUtils.clamp(1 - palmScoreAbs, 0, 1); // 1 = horizontal, 0 = vertical
         const dynamicFitAdjust = THREE.MathUtils.lerp(2.0, 2.50, horizontalness);
         
-        // Reduce scale slightly for right hand
-        const handednessScale = handedness?.toLowerCase() === "right" ? 0.85 : 1.0;
+        // Reduce scale slightly for right hand (use effective handedness for back camera)
+        const effectiveHandednessForScale = currentFacingMode === 'environment'
+          ? (handedness?.toLowerCase() === 'right' ? 'left' : 'right')
+          : handedness?.toLowerCase();
+        const handednessScale = effectiveHandednessForScale === "right" ? 0.85 : 1.0;
         
         const fitScale = THREE.MathUtils.clamp(
           fitScaleRaw * dynamicFitAdjust * handednessScale,
@@ -758,9 +761,10 @@ export default function Ring({ modelUrl }: RingProps) {
       }
 
       group.current.lookAt(camera.position);
-      const xBase = 1 - pBase.x;
+      // For front camera, mirror X coordinates; for back camera, use as-is
+      const xBase = currentFacingMode === 'user' ? 1 - pBase.x : pBase.x;
       const yBase = pBase.y;
-      const xNext = 1 - pNext.x;
+      const xNext = currentFacingMode === 'user' ? 1 - pNext.x : pNext.x;
       const yNext = pNext.y;
       const segAngle = Math.atan2(yNext - yBase, xNext - xBase);
       const targetAngle = -segAngle + 0.5;
@@ -778,8 +782,12 @@ export default function Ring({ modelUrl }: RingProps) {
 
       let closureScaleMultiplier = 1;
       if (userRotationGroup.current) {
+        // For back camera, the effective handedness appears inverted from user's perspective
+        const effectiveHandedness = currentFacingMode === 'environment' 
+          ? (handedness?.toLowerCase() === 'right' ? 'left' : 'right')
+          : handedness?.toLowerCase();
         const rotationOffsetXDeg =
-          handedness?.toLowerCase() === "right" ? -55.0 : rotationOffsetX;
+          effectiveHandedness === "right" ? -55.0 : rotationOffsetX;
         const offsetXRad = THREE.MathUtils.degToRad(rotationOffsetXDeg);
         const offsetYRad = THREE.MathUtils.degToRad(rotationOffsetY);
         const offsetZRad = THREE.MathUtils.degToRad(rotationOffsetZ);
@@ -816,7 +824,7 @@ export default function Ring({ modelUrl }: RingProps) {
           : orientation === "back"
           ? -1
           : 0;
-        const sign = handedness?.toLowerCase() === "left" ? -1 : 1;
+        const sign = effectiveHandedness === "left" ? -1 : 1;
         const targetTilt = score * TILT_MAX_RAD * sign;
         let tiltAlpha = computeAlpha(TILT_RESPONSE, 0.05, smoothingAttenuation); // Lower base strength for instant tilt response
         tiltAlpha = applyMicroJitterDamping(
@@ -894,7 +902,7 @@ export default function Ring({ modelUrl }: RingProps) {
         // Calculate target rotations for both orientations
         const backRotation = {
           x: THREE.MathUtils.degToRad(
-            handedness?.toLowerCase() === "left" ? -65.0 : -128.0
+            effectiveHandedness === "left" ? -65.0 : -128.0
           ) + tiltX.current * 8 + offsetXRad,
           y: offsetYRad,
           z: offsetZRad - closureZ,
