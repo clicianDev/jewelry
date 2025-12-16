@@ -326,6 +326,97 @@ body {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
+/* Responsive styles for smaller devices (iPhone SE, iPhone X, etc.) */
+@media (max-width: 420px), (max-height: 700px) {
+  .camera-error-content {
+    max-width: 320px;
+    padding: 20px 16px;
+    border-radius: 16px;
+    max-height: 85vh;
+    overflow-y: auto;
+    margin: 16px;
+  }
+
+  .camera-error-icon {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+  }
+
+  .camera-error-title {
+    font-size: 1.1rem;
+    margin-bottom: 6px;
+  }
+
+  .camera-error-message {
+    font-size: 0.8rem;
+    margin-bottom: 14px;
+    line-height: 1.4;
+  }
+
+  .camera-error-instructions {
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    border-radius: 10px;
+  }
+
+  .camera-error-instructions-title {
+    font-size: 0.75rem;
+    margin-bottom: 6px;
+  }
+
+  .camera-error-list {
+    font-size: 0.7rem;
+    line-height: 1.5;
+    padding-left: 16px;
+  }
+
+  .camera-error-list li {
+    margin-bottom: 3px;
+  }
+
+  .camera-error-retry-button {
+    padding: 12px 24px;
+    font-size: 0.9rem;
+    border-radius: 10px;
+  }
+}
+
+@media (max-height: 550px) {
+  .camera-error-content {
+    padding: 16px;
+    max-height: 85vh;
+  }
+
+  .camera-error-icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+  }
+
+  .camera-error-title {
+    font-size: 1rem;
+  }
+
+  .camera-error-message {
+    font-size: 0.8rem;
+    margin-bottom: 12px;
+  }
+
+  .camera-error-instructions {
+    padding: 10px;
+    margin-bottom: 12px;
+  }
+
+  .camera-error-list {
+    font-size: 0.7rem;
+    line-height: 1.4;
+  }
+
+  .camera-error-retry-button {
+    padding: 10px 20px;
+    font-size: 0.85rem;
+  }
+}
+
 .ring-selector {
   flex: 1;
   display: flex;

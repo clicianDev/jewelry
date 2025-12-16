@@ -588,9 +588,12 @@ export default function Ring({ modelUrl }: RingProps) {
       prevFilteredAnchorNorm.current.y = anchorNormY;
 
       // Account for object-fit: cover cropping
-      // Video is 640x480 (4:3), container is 360x480 (3:4)
-      // The video is cropped on left/right sides
-      const videoAspect = 640 / 480; // 1.333 (4:3)
+      // Use actual video dimensions instead of hardcoded values
+      // Mobile cameras often have different resolutions than the requested 640x480
+      const videoEl = useHandStore.getState().videoEl;
+      const actualVideoWidth = videoEl?.videoWidth || 640;
+      const actualVideoHeight = videoEl?.videoHeight || 480;
+      const videoAspect = actualVideoWidth / actualVideoHeight;
       const containerAspect = size.width / size.height;
       
       let adjustedX = anchorNormX;
